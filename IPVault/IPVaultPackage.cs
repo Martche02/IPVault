@@ -1,55 +1,105 @@
-﻿using Microsoft.VisualStudio.Shell;
-using System;
+﻿using System;
 using System.Runtime.InteropServices;
 using System.Threading;
-using System.Threading.Tasks;
+using Microsoft.VisualStudio.Shell;
+using Microsoft.VisualStudio.Shell.Interop;
+using EnvDTE;
+using EnvDTE80;
+using Task = System.Threading.Tasks.Task;
 
 namespace IPVault
 {
-    /// <summary>
-    /// This is the class that implements the package exposed by this assembly.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// The minimum requirement for a class to be considered a valid package for Visual Studio
-    /// is to implement the IVsPackage interface and register itself with the shell.
-    /// This package uses the helper classes defined inside the Managed Package Framework (MPF)
-    /// to do it: it derives from the Package class that provides the implementation of the
-    /// IVsPackage interface and uses the registration attributes defined in the framework to
-    /// register itself and its components with the shell. These attributes tell the pkgdef creation
-    /// utility what data to put into .pkgdef file.
-    /// </para>
-    /// <para>
-    /// To get loaded into VS, the package must be referred by &lt;Asset Type="Microsoft.VisualStudio.VsPackage" ...&gt; in .vsixmanifest file.
-    /// </para>
-    /// </remarks>
-    [PackageRegistration(UseManagedResourcesOnly = true, AllowsBackgroundLoading = true)]
-    [Guid(IPVaultPackage.PackageGuidString)]
-    [ProvideMenuResource("Menus.ctmenu", 1)]
-    public sealed class IPVaultPackage : AsyncPackage
+  [PackageRegistration(UseManagedResourcesOnly = true, AllowsBackgroundLoading = true)]
+  [Guid("3328b24b-bbeb-4156-a459-f38ade76d1e9")]
+  [ProvideAutoLoad(Microsoft.VisualStudio.Shell.Interop.UIContextGuids80.SolutionExists, PackageAutoLoadFlags.BackgroundLoad)]
+  public sealed class IPVaultPackage : AsyncPackage
+  {
+    private DTE2 _dte;
+    private DocumentEvents _documentEvents;
+    private SolutionEvents _solutionEvents;
+
+    protected override async Task InitializeAsync(CancellationToken cancellationToken, IProgress<ServiceProgressData> progress)
     {
-        /// <summary>
-        /// IPVaultPackage GUID string.
-        /// </summary>
-        public const string PackageGuidString = "3328b24b-bbeb-4156-a459-f38ade76d1e9";
+      await this.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
 
-        #region Package Members
+      _dte = await GetServiceAsync(typeof(DTE)) as DTE2;
 
-        /// <summary>
-        /// Initialization of the package; this method is called right after the package is sited, so this is the place
-        /// where you can put all the initialization code that rely on services provided by VisualStudio.
-        /// </summary>
-        /// <param name="cancellationToken">A cancellation token to monitor for initialization cancellation, which can occur when VS is shutting down.</param>
-        /// <param name="progress">A provider for progress updates.</param>
-        /// <returns>A task representing the async work of package initialization, or an already completed task if there is none. Do not return null from this method.</returns>
-        protected override async Task InitializeAsync(CancellationToken cancellationToken, IProgress<ServiceProgressData> progress)
+      if (_dte != null)
+      {
+        // 1. Hook de Guardar Documento (Ctrl+S)
+        _documentEvents = _dte.Events.DocumentEvents;
+        _documentEvents.DocumentSaved += OnDocumentSaved;
+
+        // 2. Hook de Abrir Solução
+        _solutionEvents = _dte.Events.SolutionEvents;
+        _solutionEvents.Opened += OnSolutionOpened;
+
+        // Se a solução já estava aberta quando a extensão carregou, dispara a função
+        if (_dte.Solution != null && _dte.Solution.IsOpen)
         {
-            // When initialized asynchronously, the current thread may be a background thread at this point.
-            // Do any initialization that requires the UI thread after switching to the UI thread.
-            await this.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
-            await GenerateVaultCommand.InitializeAsync(this);
+          OnSolutionOpened();
         }
-
-        #endregion
+      }
     }
+
+    // Roda silenciosamente ao ABRIR um projeto
+    private void OnSolutionOpened()
+    {
+      ThreadHelper.ThrowIfNotOnUIThread();
+
+      VaultExtractor extractor = new VaultExtractor(_dte);
+
+      _ = Task.Run(async () =>
+      {
+        try
+        {
+          // 1. Espera o Visual Studio avisar que o carregamento da solução inteira terminou
+          // Substituímos o WhenActivatedAsync por um loop manual para evitar o erro CS1061
+          int contextRetries = 0;
+          while (!KnownUIContexts.SolutionExistsAndFullyLoadedContext.IsActive && contextRetries < 20)
+          {
+            await Task.Delay(500);
+            contextRetries++;
+          }
+
+          // 2. Smart Polling: Espera ativamente pelo IntelliSense do C++ dar o "OK"
+          int maxRetries = 30; // Tenta por até 30 segundos
+          for (int i = 0; i < maxRetries; i++)
+          {
+            int extractedTokens = await extractor.ExtractAndSaveVaultAsync();
+
+            // Se encontrou entidades, o IntelliSense terminou de ler o código!
+            if (extractedTokens > 0)
+            {
+              break;
+            }
+
+            // Se retornou 0, o IntelliSense ainda está mastigando os headers C++. Espera 1s.
+            await Task.Delay(1000);
+          }
+        }
+        catch (Exception)
+        {
+          // Ignora falhas silenciosas de background para não crashar a IDE
+        }
+      });
+    }
+
+    // Roda silenciosamente ao SALVAR um arquivo (Ctrl+S)
+    private void OnDocumentSaved(Document document)
+    {
+      ThreadHelper.ThrowIfNotOnUIThread();
+
+      if (document.Name.EndsWith(".cpp") || document.Name.EndsWith(".h") || document.Name.EndsWith(".hpp"))
+      {
+        VaultExtractor extractor = new VaultExtractor(_dte);
+
+        _ = Task.Run(async () =>
+        {
+          // No Ctrl+S não precisa de delay, pois o código já está carregado
+          await extractor.ExtractAndSaveVaultAsync();
+        });
+      }
+    }
+  }
 }
