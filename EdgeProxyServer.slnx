@@ -3,5 +3,5 @@
     <Platform Name="x64" />
     <Platform Name="x86" />
   </Configurations>
-  <Project Path="EdgeProxyServer/EdgeProxyServer.vcxproj" />
+  <Project Path="EdgeProxyServer/EdgeProxyServer.vcxproj" Id="d241e8d9-f6be-4bb9-b6a2-86bba53e57d9" />
 </Solution>
