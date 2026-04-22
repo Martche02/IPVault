@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="IPVault/IPVault.csproj">
+    <Deploy />
+  </Project>
+</Solution>
