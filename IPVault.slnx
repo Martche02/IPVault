@@ -2,4 +2,5 @@
   <Project Path="IPVault/IPVault.csproj">
     <Deploy />
   </Project>
+  <Project Path="EdgeProxyServer/EdgeProxyServer/EdgeProxyServer.vcxproj" />
 </Solution>
