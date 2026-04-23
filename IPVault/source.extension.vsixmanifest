@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011" xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
     <Metadata>
-        <Identity Id="IPVault.4c0daf08-4e33-4121-be32-4f8bf9546f0c" Version="1.12" Language="en-US" Publisher="IPVault" />
+        <Identity Id="IPVault.4c0daf08-4e33-4121-be32-4f8bf9546f0c" Version="1.18" Language="en-US" Publisher="IPVault" />
         <DisplayName>IPVault</DisplayName>
         <Description xml:space="preserve">Empty VSIX Project.</Description>
     </Metadata>
