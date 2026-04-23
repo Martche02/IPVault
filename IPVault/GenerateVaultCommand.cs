@@ -9,6 +9,8 @@ using EnvDTE;
 using EnvDTE80;
 using System.Collections.Generic;
 using System.IO;
+using System.Text;
+using System.Text.RegularExpressions;
 
 namespace IPVault
 {
@@ -98,6 +100,21 @@ namespace IPVault
     private int methodCounter = 1;
     private int propertyCounter = 1;
     private int fileCounter = 1;
+    private int macroCounter = 1;
+    private int templateParamCounter = 1;
+    private int shortIdentifierCounter = 1;
+    private readonly HashSet<string> _processedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    private static readonly HashSet<string> CppKeywords = new HashSet<string>(StringComparer.Ordinal)
+    {
+      "alignas","alignof","and","and_eq","asm","auto","bitand","bitor","bool","break","case","catch","char","char8_t",
+      "char16_t","char32_t","class","compl","concept","const","consteval","constexpr","constinit","const_cast","continue",
+      "co_await","co_return","co_yield","decltype","default","delete","do","double","dynamic_cast","else","enum","explicit",
+      "export","extern","false","float","for","friend","goto","if","inline","int","long","mutable","namespace","new","noexcept",
+      "not","not_eq","nullptr","operator","or","or_eq","private","protected","public","register","reinterpret_cast","requires",
+      "return","short","signed","sizeof","static","static_assert","static_cast","struct","switch","template","this","thread_local",
+      "throw","true","try","typedef","typeid","typename","union","unsigned","using","virtual","void","volatile","wchar_t","while",
+      "xor","xor_eq"
+    };
 
     public VaultExtractor(DTE2 dte)
     {
@@ -154,6 +171,9 @@ namespace IPVault
                 else if (val.StartsWith("method_")) methodCounter++;
                 else if (val.StartsWith("prop_")) propertyCounter++;
                 else if (val.StartsWith("file_")) fileCounter++;
+                else if (val.StartsWith("macro_")) macroCounter++;
+                else if (val.StartsWith("tmpl_param_")) templateParamCounter++;
+                else if (val.StartsWith("short_")) shortIdentifierCounter++;
               }
             }
             catch (Exception ex)
@@ -162,6 +182,7 @@ namespace IPVault
             }
           }
         }
+        EnsureRegexMaskingRules(vault);
 
         int projectCount = 0;
         int totalProjects = 0;
@@ -229,14 +250,15 @@ namespace IPVault
 
             FileCodeModel? fcm = null;
             try { fcm = item.FileCodeModel; } catch { }
+            string filePath = "";
+            try { filePath = item.FileNames[1]; } catch { }
+            ExtractFromRawFile(filePath, vault);
 
             if (fcm != null)
             {
               try
               {
                  IpVaultLogger.Log($"[IPVault] Processing file: {item.Name}");
-                string filePath = "";
-                try { filePath = item.FileNames[1]; } catch { }
                 foreach (CodeElement element in fcm.CodeElements)
                 {
                   ProcessCodeElement(element, vault, filePath);
@@ -424,13 +446,13 @@ namespace IPVault
 
     private string SerializeJson(Dictionary<string, string> dict)
     {
-      var sb = new System.Text.StringBuilder();
+      var sb = new StringBuilder();
       sb.AppendLine("{");
       int count = 0;
       foreach (var kvp in dict)
       {
         count++;
-        sb.Append($"  \"{kvp.Key}\": \"{kvp.Value}\"");
+        sb.Append($"  \"{EscapeJsonString(kvp.Key)}\": \"{EscapeJsonString(kvp.Value)}\"");
         if (count < dict.Count) sb.AppendLine(",");
         else sb.AppendLine();
       }
@@ -441,19 +463,404 @@ namespace IPVault
     private Dictionary<string, string> ParseJson(string json)
     {
       var dict = new Dictionary<string, string>();
-      var lines = json.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
-      foreach (var line in lines)
+      var lines = json.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
+      Regex lineRegex = new Regex("^\\s*\"((?:\\\\.|[^\"\\\\])*)\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"\\s*,?\\s*$");
+      foreach (string line in lines)
       {
-        var parts = line.Split(new[] { ':' }, 2);
-        if (parts.Length == 2)
+        Match match = lineRegex.Match(line);
+        if (!match.Success)
         {
-          string key = parts[0].Trim(' ', '"', ',');
-          string val = parts[1].Trim(' ', '"', ',');
-          if (!string.IsNullOrEmpty(key) && key != "{" && key != "}")
-            dict[key] = val;
+          continue;
+        }
+
+        string key = UnescapeJsonString(match.Groups[1].Value);
+        string val = UnescapeJsonString(match.Groups[2].Value);
+        if (!string.IsNullOrEmpty(key) && key != "{" && key != "}")
+        {
+          dict[key] = val;
         }
       }
       return dict;
+    }
+
+    private void EnsureRegexMaskingRules(Dictionary<string, string> vault)
+    {
+      AddIfMissing(vault, "//[^\\r\\n]*", "generic_comment");
+      AddIfMissing(vault, "/\\*[\\s\\S]*?\\*/", "generic_comment");
+      AddIfMissing(vault, "\"(?:\\\\.|[^\"\\\\])*\"", "generic_string");
+      AddIfMissing(vault, "'(?:\\\\.|[^'\\\\])*'", "generic_string");
+    }
+
+    private void ExtractFromRawFile(string filePath, Dictionary<string, string> vault)
+    {
+      if (string.IsNullOrWhiteSpace(filePath))
+      {
+        return;
+      }
+
+      string fullPath;
+      try
+      {
+        fullPath = Path.GetFullPath(filePath);
+      }
+      catch
+      {
+        return;
+      }
+
+      if (!ShouldScanFile(fullPath))
+      {
+        return;
+      }
+
+      if (_processedFiles.Contains(fullPath))
+      {
+        return;
+      }
+
+      _processedFiles.Add(fullPath);
+
+      if (!File.Exists(fullPath))
+      {
+        return;
+      }
+
+      string content;
+      try
+      {
+        content = File.ReadAllText(fullPath);
+      }
+      catch (Exception ex)
+      {
+        IpVaultLogger.Log($"[IPVault] Error reading source file {fullPath}: {ex.Message}");
+        return;
+      }
+
+      string sanitizedContent = MaskCommentsAndStrings(content);
+      AddMacroMappings(sanitizedContent, vault);
+      AddTemplateMappings(sanitizedContent, vault);
+      AddShortIdentifierMappings(sanitizedContent, vault);
+    }
+
+    private void AddMacroMappings(string content, Dictionary<string, string> vault)
+    {
+      Regex macroRegex = new Regex("^\\s*#\\s*define\\s+([A-Za-z_][A-Za-z0-9_]*)", RegexOptions.Multiline);
+      foreach (Match match in macroRegex.Matches(content))
+      {
+        if (!match.Success)
+        {
+          continue;
+        }
+
+        string macroName = match.Groups[1].Value;
+        AddIfMissing(vault, macroName, $"macro_{NumberToAlpha(macroCounter++).ToLower()}");
+      }
+    }
+
+    private void AddTemplateMappings(string content, Dictionary<string, string> vault)
+    {
+      Regex templateDeclRegex = new Regex(
+        "template\\s*<(?<params>[^>]+)>\\s*(?:class|struct)\\s+(?<name>[A-Za-z_][A-Za-z0-9_]*)",
+        RegexOptions.Multiline);
+
+      foreach (Match match in templateDeclRegex.Matches(content))
+      {
+        if (!match.Success)
+        {
+          continue;
+        }
+
+        string templateTypeName = match.Groups["name"].Value;
+        AddIfMissing(vault, templateTypeName, $"Class{NumberToAlpha(classCounter++)}");
+
+        string parameters = match.Groups["params"].Value;
+        Regex templateParamRegex = new Regex("\\b(?:class|typename)\\s+([A-Za-z_][A-Za-z0-9_]*)");
+        foreach (Match paramMatch in templateParamRegex.Matches(parameters))
+        {
+          if (!paramMatch.Success)
+          {
+            continue;
+          }
+
+          string paramName = paramMatch.Groups[1].Value;
+          AddIfMissing(vault, paramName, $"tmpl_param_{NumberToAlpha(templateParamCounter++).ToLower()}");
+        }
+      }
+    }
+
+    private void AddShortIdentifierMappings(string content, Dictionary<string, string> vault)
+    {
+      Regex identifierRegex = new Regex("\\b[A-Za-z_][A-Za-z0-9_]*\\b");
+      foreach (Match match in identifierRegex.Matches(content))
+      {
+        if (!match.Success)
+        {
+          continue;
+        }
+
+        string identifier = match.Value;
+        if (identifier.Length >= 3 || CppKeywords.Contains(identifier))
+        {
+          continue;
+        }
+
+        AddIfMissing(vault, identifier, $"short_{NumberToAlpha(shortIdentifierCounter++).ToLower()}");
+      }
+    }
+
+    private bool ShouldScanFile(string fullPath)
+    {
+      if (string.IsNullOrWhiteSpace(fullPath))
+      {
+        return false;
+      }
+
+      string extension = Path.GetExtension(fullPath);
+      if (string.IsNullOrEmpty(extension))
+      {
+        return false;
+      }
+
+      return string.Equals(extension, ".h", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(extension, ".hpp", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(extension, ".hh", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(extension, ".hxx", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(extension, ".c", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(extension, ".cc", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(extension, ".cpp", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(extension, ".cxx", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(extension, ".ipp", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(extension, ".inl", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private string MaskCommentsAndStrings(string content)
+    {
+      if (string.IsNullOrEmpty(content))
+      {
+        return string.Empty;
+      }
+
+      StringBuilder result = new StringBuilder(content.Length);
+      bool inLineComment = false;
+      bool inBlockComment = false;
+      bool inDoubleString = false;
+      bool inSingleString = false;
+      bool escaped = false;
+
+      for (int i = 0; i < content.Length; i++)
+      {
+        char c = content[i];
+        char next = i + 1 < content.Length ? content[i + 1] : '\0';
+
+        if (inLineComment)
+        {
+          if (c == '\r' || c == '\n')
+          {
+            inLineComment = false;
+            result.Append(c);
+          }
+          else
+          {
+            result.Append(' ');
+          }
+          continue;
+        }
+
+        if (inBlockComment)
+        {
+          if (c == '*' && next == '/')
+          {
+            result.Append(' ');
+            result.Append(' ');
+            i++;
+            inBlockComment = false;
+          }
+          else if (c == '\r' || c == '\n')
+          {
+            result.Append(c);
+          }
+          else
+          {
+            result.Append(' ');
+          }
+          continue;
+        }
+
+        if (inDoubleString)
+        {
+          if (!escaped && c == '\\')
+          {
+            escaped = true;
+            result.Append(' ');
+            continue;
+          }
+
+          if (!escaped && c == '"')
+          {
+            inDoubleString = false;
+            result.Append(' ');
+            continue;
+          }
+
+          escaped = false;
+          result.Append(c == '\r' || c == '\n' ? c : ' ');
+          continue;
+        }
+
+        if (inSingleString)
+        {
+          if (!escaped && c == '\\')
+          {
+            escaped = true;
+            result.Append(' ');
+            continue;
+          }
+
+          if (!escaped && c == '\'')
+          {
+            inSingleString = false;
+            result.Append(' ');
+            continue;
+          }
+
+          escaped = false;
+          result.Append(c == '\r' || c == '\n' ? c : ' ');
+          continue;
+        }
+
+        if (c == '/' && next == '/')
+        {
+          result.Append(' ');
+          result.Append(' ');
+          i++;
+          inLineComment = true;
+          continue;
+        }
+
+        if (c == '/' && next == '*')
+        {
+          result.Append(' ');
+          result.Append(' ');
+          i++;
+          inBlockComment = true;
+          continue;
+        }
+
+        if (c == '"')
+        {
+          inDoubleString = true;
+          escaped = false;
+          result.Append(' ');
+          continue;
+        }
+
+        if (c == '\'')
+        {
+          inSingleString = true;
+          escaped = false;
+          result.Append(' ');
+          continue;
+        }
+
+        result.Append(c);
+      }
+
+      return result.ToString();
+    }
+
+    private void AddIfMissing(Dictionary<string, string> vault, string key, string value)
+    {
+      if (string.IsNullOrWhiteSpace(key) || vault.ContainsKey(key))
+      {
+        return;
+      }
+
+      vault[key] = value;
+    }
+
+    private string EscapeJsonString(string value)
+    {
+      if (value == null)
+      {
+        return string.Empty;
+      }
+
+      StringBuilder sb = new StringBuilder(value.Length + 8);
+      foreach (char c in value)
+      {
+        switch (c)
+        {
+          case '\\': sb.Append("\\\\"); break;
+          case '"': sb.Append("\\\""); break;
+          case '\b': sb.Append("\\b"); break;
+          case '\f': sb.Append("\\f"); break;
+          case '\n': sb.Append("\\n"); break;
+          case '\r': sb.Append("\\r"); break;
+          case '\t': sb.Append("\\t"); break;
+          default:
+            if (c < 0x20)
+            {
+              sb.Append("\\u");
+              sb.Append(((int)c).ToString("x4"));
+            }
+            else
+            {
+              sb.Append(c);
+            }
+            break;
+        }
+      }
+
+      return sb.ToString();
+    }
+
+    private string UnescapeJsonString(string value)
+    {
+      if (string.IsNullOrEmpty(value))
+      {
+        return string.Empty;
+      }
+
+      StringBuilder sb = new StringBuilder(value.Length);
+      for (int i = 0; i < value.Length; i++)
+      {
+        char c = value[i];
+        if (c != '\\' || i + 1 >= value.Length)
+        {
+          sb.Append(c);
+          continue;
+        }
+
+        char next = value[++i];
+        switch (next)
+        {
+          case '\\': sb.Append('\\'); break;
+          case '"': sb.Append('"'); break;
+          case 'b': sb.Append('\b'); break;
+          case 'f': sb.Append('\f'); break;
+          case 'n': sb.Append('\n'); break;
+          case 'r': sb.Append('\r'); break;
+          case 't': sb.Append('\t'); break;
+          case 'u':
+            if (i + 4 < value.Length)
+            {
+              string hex = value.Substring(i + 1, 4);
+              if (int.TryParse(hex, System.Globalization.NumberStyles.HexNumber, null, out int charCode))
+              {
+                sb.Append((char)charCode);
+                i += 4;
+                break;
+              }
+            }
+            sb.Append('u');
+            break;
+          default:
+            sb.Append(next);
+            break;
+        }
+      }
+
+      return sb.ToString();
     }
   }
 }
