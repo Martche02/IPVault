@@ -44,6 +44,7 @@ private:
   std::vector<std::string> _sortedMaskKeys;
 public:
   void LoadFromFile(const std::string& filepath);
+  void LoadFromJsonString(const std::string& jsonString);
   const std::vector<std::string>& GetSortedRealKeys() const { return _sortedRealKeys; }
   const std::vector<std::string>& GetSortedMaskKeys() const { return _sortedMaskKeys; }
   const std::string& GetMasked(const std::string& real) const { return _realToMask.at(real); }

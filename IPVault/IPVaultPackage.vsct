@@ -56,7 +56,7 @@
         <Parent guid="guidIPVaultPackageCmdSet" id="MyMenuGroup" />
         <Icon guid="guidImages" id="bmpPic1" />
         <Strings>
-          <ButtonText>Generate Zero-Trust Vault</ButtonText>
+          <ButtonText>Run Zero-Trust Copilot</ButtonText>
         </Strings>
       </Button>
     </Buttons>

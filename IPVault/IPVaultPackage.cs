@@ -16,6 +16,7 @@ namespace IPVault
   [Guid("3328b24b-bbeb-4156-a459-f38ade76d1e9")]
   [ProvideMenuResource("Menus.ctmenu", 1)]
   [ProvideAutoLoad(Microsoft.VisualStudio.Shell.Interop.UIContextGuids80.SolutionExists, PackageAutoLoadFlags.BackgroundLoad)]
+  [ProvideOptionPage(typeof(IPVaultOptions), "IPVault", "General", 0, 0, true)]
   public sealed class IPVaultPackage : AsyncPackage
   {
     private static readonly HashSet<string> CppExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)

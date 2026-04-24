@@ -11,9 +11,6 @@
 #include <sstream>
 #include <ctime>
 #include <iomanip>
-#include <filesystem>
-#include <vector>
-#include <windows.h>
 
 namespace {
   std::mutex g_logMutex;
@@ -250,129 +247,12 @@ void CompletionHandler::HandleRequest(const httplib::Request& req, httplib::Resp
 // 5. MAIN COM SUPER DEBUGGER E GATEWAY
 // ==========================================
 
-int main(int argc, char* argv[])
+int main()
 {
   try
   {
-    // 1) Parse simple command-line args to allow: --api-Key <key>  --model <model>  --port <port>  --no-copilot
-    bool launchCopilot = true;
-    bool proxyOnly = false;
-    std::string apiKeyArg;
-    std::string modelArg;
-    int portOverride = -1;
-
-    for (int i = 1; i < argc; ++i) {
-      std::string a = argv[i];
-      if (a == "--api-Key" || a == "--apiKey") {
-        if (i + 1 < argc) apiKeyArg = argv[++i];
-      }
-      else if (a == "--model" || a == "--target-model") {
-        if (i + 1 < argc) modelArg = argv[++i];
-      }
-      else if (a == "--port") {
-        if (i + 1 < argc) portOverride = std::stoi(argv[++i]);
-      }
-      else if (a == "--no-copilot") {
-        launchCopilot = false;
-      }
-      else if (a == "--proxy-only") {
-        proxyOnly = true;
-      }
-      else if (a == "--help" || a == "-h") {
-        std::cout << "Usage: EdgeProxyServer.exe --api-Key <KEY> [--model <MODEL>] [--port <PORT>] [--no-copilot] [--proxy-only]\n";
-        return 0;
-      }
-    }
-
-    // 2) If provided via CLI, export the env vars so LoadFromEnvironment() works as before
-    if (!apiKeyArg.empty()) {
-      _putenv_s("OPENAI_API_KEY", apiKeyArg.c_str());
-    }
-    if (!modelArg.empty()) {
-      _putenv_s("TARGET_MODEL", modelArg.c_str());
-    }
-    if (portOverride > 0) {
-      _putenv_s("PROXY_PORT", std::to_string(portOverride).c_str());
-    }
-
     Config config;
     config.LoadFromEnvironment();
-
-    auto findRepoRoot = []() -> std::filesystem::path {
-      std::filesystem::path probe = std::filesystem::current_path();
-      for (int i = 0; i < 5; ++i) {
-        if (std::filesystem::exists(probe / "HowToRun.md") || std::filesystem::exists(probe / "EdgeProxyServer.slnx")) {
-          return probe;
-        }
-        if (!probe.has_parent_path()) break;
-        probe = probe.parent_path();
-      }
-      return std::filesystem::current_path();
-      };
-
-    // Default UX: keep Copilot in the current terminal and move proxy to an auxiliary terminal.
-    if (launchCopilot && !proxyOnly) {
-      std::filesystem::path exePath = std::filesystem::absolute(argv[0]);
-      std::string exe = exePath.string();
-      for (auto& c : exe) if (c == '/') c = '\\';
-
-      std::ostringstream proxyCmd;
-      proxyCmd << "\"" << exe << "\" --proxy-only --no-copilot --port " << config.GetPort();
-      if (!config.GetTargetModel().empty()) {
-        proxyCmd << " --model \"" << config.GetTargetModel() << "\"";
-      }
-      std::string proxyCmdLine = proxyCmd.str();
-      std::vector<char> proxyCmdMutable(proxyCmdLine.begin(), proxyCmdLine.end());
-      proxyCmdMutable.push_back('\0');
-
-      STARTUPINFOA si{};
-      si.cb = sizeof(si);
-      si.dwFlags = STARTF_USESHOWWINDOW;
-      si.wShowWindow = SW_HIDE;
-
-      PROCESS_INFORMATION pi{};
-      if (!CreateProcessA(
-        nullptr,
-        proxyCmdMutable.data(),
-        nullptr,
-        nullptr,
-        FALSE,
-        CREATE_NO_WINDOW | DETACHED_PROCESS,
-        nullptr,
-        nullptr,
-        &si,
-        &pi))
-      {
-        Logger::Error("Falha ao iniciar proxy oculto. Erro Win32: " + std::to_string(GetLastError()));
-        return 1;
-      }
-
-      CloseHandle(pi.hThread);
-      CloseHandle(pi.hProcess);
-
-      // Wait for auxiliary proxy readiness.
-      httplib::Client localCli("127.0.0.1", config.GetPort());
-      const int timeoutSeconds = 10;
-      bool ok = false;
-      for (int i = 0; i < timeoutSeconds * 5; ++i) {
-        try {
-          auto r = localCli.Get("/ping");
-          if (r && r->status == 200) { ok = true; break; }
-        }
-        catch (...) { /* ignore and retry */ }
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
-      }
-      if (!ok) {
-        Logger::Error("Proxy auxiliar nao respondeu em " + std::to_string(timeoutSeconds) + "s.");
-        return 1;
-      }
-
-      std::filesystem::current_path(findRepoRoot());
-      _putenv_s("NO_PROXY", "api.github.com,github.com,githubusercontent.com,telemetry.individual.githubcopilot.com,api.individual.githubcopilot.com");
-      _putenv_s("HTTPS_PROXY", ("http://127.0.0.1:" + std::to_string(config.GetPort())).c_str());
-      Logger::Info("Proxy iniciado em background oculto. Iniciando Copilot no terminal atual...");
-      return std::system("copilot");
-    }
 
     IpVault vault;
     vault.LoadFromFile(config.GetVaultPath());
@@ -427,6 +307,9 @@ int main(int argc, char* argv[])
       // SANITIZAÇÃO BRUTA: Aplica máscara em todo o JSON, ignorando a estrutura
       if (req.method == "POST" && !body.empty()) {
         body = sanitizer.SanitizeString(body);
+
+        // REMOVIDO: A forçação de "stream: false" que quebrava o CLI.
+        // Agora respeitamos o que o CLI pediu (SSE Stream).
 
         std::cout << "     [->] Payload (RAW) mascarado com sucesso.\n";
       }
@@ -494,8 +377,11 @@ int main(int argc, char* argv[])
     // O CATCH-ALL (Rede de Segurança Universal)
     svr.set_error_handler([&](const httplib::Request& req, httplib::Response& res) {
       if (req.method == "CONNECT") {
-        std::cout << "\n[ERRO DE ROTA] Tentativa CONNECT rejeitada: " << req.path << "\n";
-        res.status = 405;
+        std::string hostPort = req.path;
+        Logger::Info("CONNECT interceptado: " + hostPort);
+        std::cout << "\n[CONNECT] Aceito: " << hostPort << "\n";
+        res.status = 200;
+        res.set_header("Connection", "keep-alive");
         return;
       }
       std::cout << "\n[CATCH-ALL] Rota nao mapeada detectada (" << req.path << "). Redirecionando...\n";
@@ -515,35 +401,10 @@ int main(int argc, char* argv[])
     }
     Logger::Info("Log de trafego Copilot em: " + proxyLogPath);
 
-    // Start server in background thread so we can also launch Copilot in a new console window
-    std::thread serverThread([&svr, &config]() {
-      if (!svr.listen("0.0.0.0", config.GetPort())) {
-        Logger::Error("Falha ao abrir a porta " + std::to_string(config.GetPort()));
-        // If server can't start, exit the process to avoid orphaned Copilot
-        std::exit(1);
-      }
-    });
-
-    // Wait until the local server responds on /ping (with timeout) before launching Copilot.
-    {
-      httplib::Client localCli("127.0.0.1", config.GetPort());
-      const int timeoutSeconds = 10;
-      bool ok = false;
-      for (int i = 0; i < timeoutSeconds * 5; ++i) { // check every 200ms
-        try {
-          auto r = localCli.Get("/ping");
-          if (r && r->status == 200) { ok = true; break; }
-        }
-        catch (...) { /* ignore and retry */ }
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
-      }
-      if (!ok) {
-        Logger::Error("Aviso: servidor nao respondeu em " + std::to_string(timeoutSeconds) + "s; ainda assim procedendo ao lancamento do Copilot.");
-      }
+    if (!svr.listen("0.0.0.0", config.GetPort())) {
+      Logger::Error("Falha ao abrir a porta " + std::to_string(config.GetPort()));
+      return 1;
     }
-
-    // Wait for the server thread to finish (blocking)
-    serverThread.join();
   }
   catch (const std::exception& e)
   {
@@ -552,3 +413,4 @@ int main(int argc, char* argv[])
   }
   return 0;
 }
+
