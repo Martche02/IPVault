@@ -41,10 +41,28 @@ namespace {
       headerNameLower == "content-type" ||
       headerNameLower == "content-length" ||
       headerNameLower == "content-encoding" ||
-      headerNameLower == "transfer-encoding" ||
-      headerNameLower == "accept" ||
-      headerNameLower == "accept-encoding" ||
       headerNameLower == "user-agent";
+  }
+
+  bool func_token_is_regex(const std::string& s) {
+    const std::string regexChars = R"(\[]{}()*+?.^$|)";
+    for (char c : s) {
+      if (regexChars.find(c) != std::string::npos) return true;
+    }
+    return false;
+  }
+
+  std::string func_token36(const std::string& input)
+  {
+    std::string result;
+    const std::string specialChars = R"(\[]{}()*+?.^$|)";
+    for (char c : input) {
+      if (specialChars.find(c) != std::string::npos) {
+        result += '\\';
+      }
+      result += c;
+    }
+    return result;
   }
 
   std::string func_token30()
@@ -139,11 +157,29 @@ void Sanitizer::InitializeRules(const IpVault& vault)
 {
   _sanitizeRules.clear();
   _restoreRules.clear();
-  for (const std::string& realName : vault.GetSortedRealKeys())
-    _sanitizeRules.push_back({ std::regex("\\b" + realName + "\\b"), vault.GetMasked(realName) });
+  
+  // Blacklist of generic masks that should NEVER be restored
+  static const std::vector<std::string> blacklist = { "generic_string", "generic_comment", "generic_identifier" };
 
-  for (const std::string& maskName : vault.GetSortedMaskKeys())
-    _restoreRules.push_back({ std::regex("\\b" + maskName + "\\b"), vault.GetReal(maskName) });
+  for (const std::string& realName : vault.GetSortedRealKeys()) {
+    std::string maskedName = vault.GetMasked(realName);
+    
+    if (func_token_is_regex(realName)) {
+      // It's a regex rule: use it for sanitization but NOT for restoration
+      _sanitizeRules.push_back({ std::regex(realName), maskedName });
+    } else {
+      // Literal name: use word boundaries and escape
+      std::string escaped = func_token36(realName);
+      _sanitizeRules.push_back({ std::regex("\\b" + escaped + "\\b"), maskedName });
+      
+      // ONLY restore literals that are not in the blacklist
+      bool isBlacklisted = std::find(blacklist.begin(), blacklist.end(), maskedName) != blacklist.end();
+      if (!isBlacklisted) {
+        std::string escapedMask = func_token36(maskedName);
+        _restoreRules.push_back({ std::regex("\\b" + escapedMask + "\\b"), realName });
+      }
+    }
+  }
 }
 
 std::string Sanitizer::SanitizeString(const std::string& text) const
@@ -286,7 +322,7 @@ int main()
     auto transparentForwarder = [&](const httplib::Request& req, httplib::Response& res) {
       std::cout << "\n[CLI TRANSPARENTE] Roteando " << req.method << " " << req.path << " direto para o GitHub...\n";
 
-      httplib::SSLClient cli("api.githubcopilot.com");
+      httplib::SSLClient cli("models.inference.ai.azure.com");
       cli.set_read_timeout(120, 0);
 
       // Copia os headers, removendo interferências
@@ -294,24 +330,25 @@ int main()
       for (const auto& h : req.headers) {
         const std::string keyLower = func_token33(h.first);
         if (!func_token34(keyLower)) {
-          std::string value = h.second;
-          if (!func_token35(keyLower)) {
-            value = sanitizer.SanitizeString(value);
-          }
-          headers.emplace(h.first, value);
+          // NUNCA sanitizar headers - eles devem ir puros para o backend
+          headers.emplace(h.first, h.second);
         }
       }
 
       std::string body = req.body;
 
-      // SANITIZAÇÃO BRUTA: Aplica máscara em todo o JSON, ignorando a estrutura
+      // SANITIZAÇÃO ESTRUTURADA: Parse JSON e sanitiza apenas valores sensíveis
       if (req.method == "POST" && !body.empty()) {
-        body = sanitizer.SanitizeString(body);
-
-        // REMOVIDO: A forçação de "stream: false" que quebrava o CLI.
-        // Agora respeitamos o que o CLI pediu (SSE Stream).
-
-        std::cout << "     [->] Payload (RAW) mascarado com sucesso.\n";
+        try {
+          auto jsonPayload = nlohmann::json::parse(body);
+          sanitizer.SanitizeJsonPayload(jsonPayload, config.GetTargetModel());
+          body = jsonPayload.dump();
+          std::cout << "     [->] Payload (JSON) mascarado com sucesso.\n";
+        } catch (...) {
+          // Se não for JSON válido, sanitiza como string
+          body = sanitizer.SanitizeString(body);
+          std::cout << "     [->] Payload (RAW STRING) mascarado com sucesso.\n";
+        }
       }
 
       func_token32("OUTBOUND TO COPILOT", req.method, req.path, body);
@@ -328,9 +365,16 @@ int main()
 
           func_token32("INBOUND FROM COPILOT", req.method, req.path, res_body);
 
-          // RESTAURAÇÃO BRUTA
+          // RESTAURAÇÃO ESTRUTURADA
           if (!res_body.empty()) {
-            res_body = sanitizer.RestoreString(res_body);
+            try {
+              auto jsonResponse = nlohmann::json::parse(res_body);
+              sanitizer.RestoreJsonPayload(jsonResponse);
+              res_body = jsonResponse.dump();
+            } catch (...) {
+              // Se não for JSON, restaura como string
+              res_body = sanitizer.RestoreString(res_body);
+            }
           }
 
           // DEVOLVE OS HEADERS ORIGINAIS PARA O CLI!
