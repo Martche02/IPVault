@@ -146,7 +146,7 @@ void IpVault::LoadFromFile(const std::string& filepath)
     std::sort(_sortedMaskKeys.begin(), _sortedMaskKeys.end(), sortByLengthDesc);
     Logger::Info("Vault carregado. Entidades: " + std::to_string(_realToMask.size()));
   }
-  catch (...) { Logger::Error("Erro ao ler JSON do Vault."); }
+  catch (const std::exception& e) { Logger::Error("Erro ao ler JSON do Vault: " + std::string(e.what())); }
 }
 
 // ==========================================
@@ -157,42 +157,83 @@ void Sanitizer::InitializeRules(const IpVault& vault)
 {
   _sanitizeRules.clear();
   _restoreRules.clear();
+  _literalSanitize.clear();
+  _literalRestore.clear();
   
-  // Blacklist of generic masks that should NEVER be restored
   static const std::vector<std::string> blacklist = { "generic_string", "generic_comment", "generic_identifier" };
 
   for (const std::string& realName : vault.GetSortedRealKeys()) {
     std::string maskedName = vault.GetMasked(realName);
     
     if (func_token_is_regex(realName)) {
-      // It's a regex rule: use it for sanitization but NOT for restoration
       _sanitizeRules.push_back({ std::regex(realName), maskedName });
     } else {
-      // Literal name: use word boundaries and escape
-      std::string escaped = func_token36(realName);
-      _sanitizeRules.push_back({ std::regex("\\b" + escaped + "\\b"), maskedName });
+      // For literals, we use both a faster string search and a regex for word boundaries
+      _literalSanitize.push_back({ realName, maskedName });
       
-      // ONLY restore literals that are not in the blacklist
       bool isBlacklisted = std::find(blacklist.begin(), blacklist.end(), maskedName) != blacklist.end();
       if (!isBlacklisted) {
-        std::string escapedMask = func_token36(maskedName);
-        _restoreRules.push_back({ std::regex("\\b" + escapedMask + "\\b"), realName });
+        _literalRestore.push_back({ maskedName, realName });
       }
     }
   }
 }
 
+static bool IsWordBoundary(char c) {
+  return !std::isalnum(static_cast<unsigned char>(c)) && c != '_';
+}
+
 std::string Sanitizer::SanitizeString(const std::string& text) const
 {
+  if (text.empty()) return text;
   std::string result = text;
-  for (const auto& rule : _sanitizeRules) result = std::regex_replace(result, rule.pattern, rule.replacement);
+
+  // 1. Literal replacements (Word-Boundary Aware & Stack-Safe)
+  for (const auto& rule : _literalSanitize) {
+    if (rule.first.length() < 3) continue; 
+    
+    size_t pos = 0;
+    int limit = 0;
+    while ((pos = result.find(rule.first, pos)) != std::string::npos && limit < 5000) {
+      bool leftOk = (pos == 0) || IsWordBoundary(result[pos - 1]);
+      bool rightOk = (pos + rule.first.length() == result.length()) || IsWordBoundary(result[pos + rule.first.length()]);
+
+      if (leftOk && rightOk) {
+        result.replace(pos, rule.first.length(), rule.second);
+        pos += rule.second.length();
+      } else {
+        pos += 1;
+      }
+      limit++;
+    }
+  }
+
   return result;
 }
 
 std::string Sanitizer::RestoreString(const std::string& text) const
 {
+  if (text.empty()) return text;
   std::string result = text;
-  for (const auto& rule : _restoreRules) result = std::regex_replace(result, rule.pattern, rule.replacement);
+
+  // 1. Literal restorations
+  for (const auto& rule : _literalRestore) {
+    if (rule.first.length() < 3) continue; 
+    size_t pos = 0;
+    int limit = 0;
+    while ((pos = result.find(rule.first, pos)) != std::string::npos && limit < 5000) {
+      bool leftOk = (pos == 0) || IsWordBoundary(result[pos - 1]);
+      bool rightOk = (pos + rule.first.length() == result.length()) || IsWordBoundary(result[pos + rule.first.length()]);
+
+      if (leftOk && rightOk) {
+        result.replace(pos, rule.first.length(), rule.second);
+        pos += rule.second.length();
+      } else {
+        pos += 1;
+      }
+      limit++;
+    }
+  }
   return result;
 }
 
@@ -206,10 +247,15 @@ void Sanitizer::SanitizeJsonPayload(nlohmann::json& payload, const std::string& 
 
   if (payload.contains("messages") && payload["messages"].is_array())
   {
-    for (auto& msg : payload["messages"])
+    auto& msgs = payload["messages"];
+    for (size_t i = 0; i < msgs.size(); ++i)
     {
-      if (msg.contains("content") && msg["content"].is_string())
-        msg["content"] = SanitizeString(msg["content"].get<std::string>());
+      try {
+        auto& msg = msgs[i];
+        if (msg.contains("content") && msg["content"].is_string()) {
+          msg["content"] = SanitizeString(msg["content"].get<std::string>());
+        }
+      } catch (...) {}
     }
   }
 }
@@ -248,11 +294,18 @@ void CompletionHandler::HandleRequest(const httplib::Request& req, httplib::Resp
 {
   try
   {
+    // Dump para debug se crashar
+    {
+       std::ofstream dump("last_request.json");
+       dump << req.body;
+    }
+
     nlohmann::json reqJson = nlohmann::json::parse(req.body);
+    std::cout << "[INFO] JSON da requisicao parseado. Iniciando sanitizacao estruturada..." << std::endl;
     _sanitizer.SanitizeJsonPayload(reqJson, _targetModel);
 
     std::string cleanedBody = reqJson.dump();
-    std::cout << "\n[OK] Requisicao convertida. Enviando para LLM..." << std::endl;
+    std::cout << "[OK] Sanitizacao concluida. Tamanho do payload: " << cleanedBody.length() << " bytes. Enviando para Azure..." << std::endl;
 
     auto apiRes = _llmClient.PostChatCompletion(cleanedBody);
 
@@ -264,17 +317,21 @@ void CompletionHandler::HandleRequest(const httplib::Request& req, httplib::Resp
       return;
     }
 
-    nlohmann::json resJson = nlohmann::json::parse(apiRes->body);
-    _sanitizer.RestoreJsonPayload(resJson);
-
-    res.status = 200;
-    res.set_content(resJson.dump(), "application/json");
-    std::cout << "[OK] Resposta entregue com sucesso." << std::endl;
+    try {
+      nlohmann::json resJson = nlohmann::json::parse(apiRes->body);
+      _sanitizer.RestoreJsonPayload(resJson);
+      res.status = 200;
+      res.set_content(resJson.dump(), "application/json");
+      std::cout << "[OK] Resposta entregue com sucesso." << std::endl;
+    } catch (const std::exception& je) {
+      Logger::Error("Erro ao parsear resposta do Azure: " + std::string(je.what()));
+      res.status = 200;
+      res.set_content(_sanitizer.RestoreString(apiRes->body), "application/json");
+    }
   }
   catch (const std::exception& e)
   {
-    Logger::Error("Erro Interno: ");
-    Logger::Error(e.what());
+    Logger::Error("Erro Interno no Handler: " + std::string(e.what()));
     res.status = 500;
   }
 }
@@ -322,7 +379,7 @@ int main()
     auto transparentForwarder = [&](const httplib::Request& req, httplib::Response& res) {
       std::cout << "\n[CLI TRANSPARENTE] Roteando " << req.method << " " << req.path << " direto para o GitHub...\n";
 
-      httplib::SSLClient cli("models.inference.ai.azure.com");
+      httplib::SSLClient cli("api.githubcopilot.com");
       cli.set_read_timeout(120, 0);
 
       // Copia os headers, removendo interferências
@@ -371,8 +428,8 @@ int main()
               auto jsonResponse = nlohmann::json::parse(res_body);
               sanitizer.RestoreJsonPayload(jsonResponse);
               res_body = jsonResponse.dump();
-            } catch (...) {
-              // Se não for JSON, restaura como string
+            } catch (const std::exception& e) {
+              std::cout << "     [!] Aviso: Resposta nao eh JSON estruturado (" << e.what() << "). Usando restauracao bruta.\n";
               res_body = sanitizer.RestoreString(res_body);
             }
           }

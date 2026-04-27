@@ -55,8 +55,11 @@ class Sanitizer
 {
 private:
   struct ReplaceRule { std::regex pattern; std::string replacement; };
+  struct LiteralRule { std::string first; std::string second; };
   std::vector<ReplaceRule> _sanitizeRules;
   std::vector<ReplaceRule> _restoreRules;
+  std::vector<LiteralRule> _literalSanitize;
+  std::vector<LiteralRule> _literalRestore;
 public:
   void InitializeRules(const IpVault& vault);
   std::string SanitizeString(const std::string& text) const;
