@@ -56,7 +56,14 @@
         <Parent guid="guidIPVaultPackageCmdSet" id="MyMenuGroup" />
         <Icon guid="guidImages" id="bmpPic1" />
         <Strings>
-          <ButtonText>Run Zero-Trust Copilot</ButtonText>
+          <ButtonText>Generate IP Vault</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidIPVaultPackageCmdSet" id="RunGeminiCommandId" priority="0x0200" type="Button">
+        <Parent guid="guidIPVaultPackageCmdSet" id="MyMenuGroup" />
+        <Icon guid="guidImages" id="bmpPicSearch" />
+        <Strings>
+          <ButtonText>Run Gemini</ButtonText>
         </Strings>
       </Button>
     </Buttons>
@@ -76,10 +83,10 @@
     <!-- This is the package guid. -->
     <GuidSymbol name="guidIPVaultPackage" value="{3328b24b-bbeb-4156-a459-f38ade76d1e9}" />
 
-    <!-- This is the guid used to group the menu commands together -->
     <GuidSymbol name="guidIPVaultPackageCmdSet" value="{45101b51-12e9-48b7-8bc7-7c02d439b422}">
       <IDSymbol name="MyMenuGroup" value="0x1020" />
       <IDSymbol name="GenerateVaultCommandId" value="0x0100" />
+      <IDSymbol name="RunGeminiCommandId" value="0x0101" />
     </GuidSymbol>
 
     <GuidSymbol name="guidImages" value="{d3843d84-eaf8-4dc5-9365-60a485e4156c}" >

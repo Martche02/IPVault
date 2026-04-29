@@ -62,14 +62,14 @@ namespace IPVault
         return;
       }
 
-      IPVaultOptions options = (IPVaultOptions)this.package.GetDialogPage(typeof(IPVaultOptions));
+
 
       VaultExtractor extractor = new VaultExtractor(dte, this.package);
       _ = this.package.JoinableTaskFactory.RunAsync(async () =>
       {
         try
         {
-          await extractor.ExtractAndLaunchCopilotAsync(options);
+          await extractor.ExtractAndSaveVaultAsync();
         }
         catch (Exception ex)
         {
@@ -79,8 +79,8 @@ namespace IPVault
 
       VsShellUtilities.ShowMessageBox(
           this.package,
-          "Geração do Zero-Trust Copilot iniciada! O terminal interativo será aberto em instantes.",
-          "Zero-Trust Vault",
+          "IP Vault map generated successfully!",
+          "IP Vault",
           OLEMSGICON.OLEMSGICON_INFO,
           OLEMSGBUTTON.OLEMSGBUTTON_OK,
           OLEMSGDEFBUTTON.OLEMSGDEFBUTTON_FIRST);
@@ -109,7 +109,10 @@ namespace IPVault
     private int namespaceCounter = 1;
     private int nameCounter = 1;
     private readonly HashSet<string> _processedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _solutionFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string> _namespaceTokenMap = new Dictionary<string, string>(StringComparer.Ordinal);
+    private readonly HashSet<string> _externalVault = new HashSet<string>(StringComparer.Ordinal);
+    private bool _isCurrentlyExternal = false;
 
     private class NameObservation
     {
@@ -156,7 +159,9 @@ namespace IPVault
       "u32string", "u8string", "underflow_error", "unique", "unique_copy", "unique_lock", "unique_ptr", "unordered_map",
       "unordered_multimap", "unordered_multiset", "unordered_set", "upper_bound", "valarray", "variant", "vector", "weak_ptr",
       "ws", "wstring",
-      "_DEBUG", "_MSC_BUILD", "_MSC_EXTENSIONS", "_MSC_FULL_VER", "_MSC_VER", "_MSVC_LANG", "_MT", "_WIN32", "_WIN64"
+      "_DEBUG", "_MSC_BUILD", "_MSC_EXTENSIONS", "_MSC_FULL_VER", "_MSC_VER", "_MSVC_LANG", "_MT", "_WIN32", "_WIN64",
+      "value", "begin", "end", "size", "count", "data", "length", "index", "find", "clear", "erase", "insert", "emplace", "push", "pop", "back", "front", "now", "time", "date", "filesystem", "windows", "tolower", "toupper", "header", "name", "status", "error", "result", "ptr", "handle", "mutex", "lock", "unlock", "std", "json", "rapidjson", "nlohmann", "protobuf", "grpc", "http", "https", "url", "uri", "ip", "address", "port", "host", "server", "client", "request", "response", "body", "message", "payload", "version", "tag", "id", "uuid", "guid", "key", "token",
+      "text", "buffer", "temp", "dummy", "first", "last", "where", "pred", "comp", "alloc", "allocator", "traits", "type", "pointer", "reference", "node", "link", "head", "tail", "root", "prev", "next", "left", "right", "parent", "child", "sibling", "color", "state", "code", "info", "elem", "element", "item", "bucket", "reserve", "start", "finish", "done", "found", "flag", "offset", "total", "sum", "diff", "delta", "size_type", "difference_type", "value_type", "iterator_category", "key_type", "mapped_type", "hasher", "hash_function", "key_equal", "const_reference", "find_first_of", "find_last_of", "find_first_not_of", "find_last_not_of", "npos", "substr", "compare", "copy", "fill", "replace", "remove", "sort", "search", "reverse", "rotate", "shuffle", "sample", "partition", "merge", "includes", "push_heap", "pop_heap", "make_heap", "sort_heap", "is_heap", "clamp", "min", "max", "minmax", "iota", "accumulate", "reduce"
     };
 
     public VaultExtractor(DTE2 dte, AsyncPackage? package = null)
@@ -263,6 +268,15 @@ namespace IPVault
         IpVaultLogger.Log($"[IPVault] Total projects found: {totalProjects}, C++ projects: {projectCount}");
         IpVaultLogger.Log($"[IPVault] Total entities extracted: {vault.Count}");
 
+        IpVaultLogger.Log($"[IPVault] Subtracting {_externalVault.Count} external identifiers...");
+        foreach (string ext in _externalVault)
+        {
+          if (vault.ContainsKey(ext))
+          {
+            vault.Remove(ext);
+          }
+        }
+
         string jsonString = SerializeJson(vault);
         File.WriteAllText(vaultFilePath, jsonString);
         WriteExtractionLog(solution.FullName, vault);
@@ -277,150 +291,6 @@ namespace IPVault
       }
     }
 
-    public async System.Threading.Tasks.Task ExtractAndLaunchCopilotAsync(IPVaultOptions options)
-    {
-      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-
-      if (string.IsNullOrWhiteSpace(options.OpenAiApiKey))
-      {
-          if (_package != null)
-          {
-              VsShellUtilities.ShowMessageBox(
-                 _package,
-                 "Por favor, configure o Token do GitHub Copilot (OpenAI API Key) em Tools > Options > IPVault antes de rodar o Zero-Trust Copilot.",
-                 "Aviso IPVault", OLEMSGICON.OLEMSGICON_WARNING, OLEMSGBUTTON.OLEMSGBUTTON_OK, OLEMSGDEFBUTTON.OLEMSGDEFBUTTON_FIRST);
-          }
-          return;
-      }
-
-      // 1. Extrai os dados do cofre
-      await ExtractAndSaveVaultAsync();
-
-      string solutionDir = Path.GetDirectoryName(_dte.Solution.FullName) ?? Path.GetTempPath();
-      string vaultFilePath = Path.Combine(solutionDir, ".vs", "IPVault", "ip_vault_map.json");
-      string jsonMap = File.Exists(vaultFilePath) ? File.ReadAllText(vaultFilePath) : "{}";
-
-      // 2. Localiza o Executável do Proxy (assumindo que será empacotado na mesma pasta ou buscar na solution)
-      string assemblyDir = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location);
-      string proxyExe = Path.Combine(assemblyDir, "EdgeProxyServer.exe");
-
-      // Se não achar localmente (dev loop), tenta buscar na Solution
-      if (!File.Exists(proxyExe) && _dte.Solution != null) {
-          string solDir = Path.GetDirectoryName(_dte.Solution.FullName);
-          if (!string.IsNullOrEmpty(solDir)) {
-              string debugExe = Path.Combine(solDir, "x64", "Debug", "EdgeProxyServer.exe");
-              if (File.Exists(debugExe)) proxyExe = debugExe;
-          }
-      }
-
-      if (!File.Exists(proxyExe))
-      {
-         if (_package != null)
-         {
-             VsShellUtilities.ShowMessageBox(
-                _package,
-                $"Executável EdgeProxyServer.exe não encontrado em {proxyExe}! Certifique-se de compilar o C++ e colocá-lo na pasta da extensão.",
-                "Erro IPVault", OLEMSGICON.OLEMSGICON_CRITICAL, OLEMSGBUTTON.OLEMSGBUTTON_OK, OLEMSGDEFBUTTON.OLEMSGDEFBUTTON_FIRST);
-         }
-         return;
-      }
-
-      // 3. Obtém uma porta dinâmica e livre do Sistema Operacional
-      int proxyPort = 8080;
-      try {
-          System.Net.Sockets.TcpListener l = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
-          l.Start();
-          proxyPort = ((System.Net.IPEndPoint)l.LocalEndpoint).Port;
-          l.Stop();
-      } catch { }
-
-      // 4. Lança o Proxy Invisível e injeta o MAP via STDIN
-      string logDir = Path.Combine(solutionDir, ".vs", "IPVault");
-
-      // Garante que o diretório de log existe antes de iniciar o proxy
-      Directory.CreateDirectory(logDir);
-      IpVaultLogger.Log($"[IPVault] Proxy log directory ensured: {logDir}");
-
-      System.Diagnostics.ProcessStartInfo proxyPsi = new System.Diagnostics.ProcessStartInfo(proxyExe)
-      {
-        // --log-dir fica como fallback para uso manual/CLI do proxy
-        Arguments = $"--proxy-only --stdin-map --port {proxyPort} --log-dir \"{logDir}\"",
-        RedirectStandardInput = true,
-        UseShellExecute = false,
-        CreateNoWindow = true
-      };
-
-      // Injeta PROXY_LOG_PATH diretamente no ambiente do processo filho.
-      // Isso é mais confiável do que depender do _putenv_s interno do C++,
-      // pois garante que o env var está disponível desde o início do processo.
-      proxyPsi.EnvironmentVariables["PROXY_LOG_PATH"] = logDir;
-
-      if (!string.IsNullOrWhiteSpace(options.OpenAiApiKey))
-      {
-        proxyPsi.EnvironmentVariables["OPENAI_API_KEY"] = options.OpenAiApiKey;
-      }
-      if (!string.IsNullOrWhiteSpace(options.TargetModel))
-      {
-        proxyPsi.EnvironmentVariables["TARGET_MODEL"] = options.TargetModel;
-      }
-
-      System.Diagnostics.Process proxy = System.Diagnostics.Process.Start(proxyPsi);
-      if (proxy != null)
-      {
-          _ = Task.Run(async () =>
-          {
-              try
-              {
-                  await proxy.StandardInput.WriteAsync(jsonMap);
-                  proxy.StandardInput.Close();
-              }
-              catch (Exception ex)
-              {
-                  IpVaultLogger.Log($"[IPVault] Erro ao escrever no pipe do proxy: {ex.Message}");
-              }
-          });
-      }
-
-      // Aguarda o proxy responder ao /ping (até 10s) antes de lançar o Copilot
-      IpVaultLogger.Log($"[IPVault] Aguardando proxy na porta {proxyPort} responder ao /ping...");
-      bool proxyReady = false;
-      for (int i = 0; i < 50; i++) // 50 × 200ms = 10s
-      {
-        try
-        {
-          using var http = new System.Net.Http.HttpClient();
-          http.Timeout = TimeSpan.FromMilliseconds(500);
-          var resp = await http.GetAsync($"http://127.0.0.1:{proxyPort}/ping");
-          if (resp.IsSuccessStatusCode) { proxyReady = true; break; }
-        }
-        catch { /* ainda subindo, aguarda */ }
-        await Task.Delay(200);
-      }
-
-      if (!proxyReady)
-        IpVaultLogger.Log($"[IPVault] AVISO: proxy não respondeu em 10s. Lançando Copilot assim mesmo.");
-      else
-        IpVaultLogger.Log($"[IPVault] Proxy pronto na porta {proxyPort}. Lançando Copilot CLI.");
-
-      // Lança o Copilot CLI usando PowerShell para garantir que as variáveis de ambiente sejam aplicadas corretamente.
-      // Removemos qualquer modelo hardcoded; usamos apenas o que estiver nas configurações.
-      string modelEnv = string.IsNullOrWhiteSpace(options.TargetModel) ? "" : $"$env:COPILOT_MODEL='{options.TargetModel}'; ";
-      string copilotCmd = $"$env:COPILOT_PROVIDER_BASE_URL='http://127.0.0.1:{proxyPort}'; " +
-                          $"$env:COPILOT_PROVIDER_API_KEY='{options.OpenAiApiKey}'; " +
-                          modelEnv +
-                          "$env:NO_PROXY='api.github.com,github.com,githubusercontent.com,telemetry.individual.githubcopilot.com,api.individual.githubcopilot.com'; " +
-                          "copilot";
-
-      System.Diagnostics.ProcessStartInfo copilotPsi = new System.Diagnostics.ProcessStartInfo("powershell.exe", $"-NoExit -Command \"{copilotCmd}\"")
-      {
-        UseShellExecute = false,
-        CreateNoWindow = false // Visível para o usuário interagir
-      };
-
-      IpVaultLogger.Log($"[IPVault] Copilot CLI configurado via PowerShell (Porta: {proxyPort})");
-      System.Diagnostics.Process.Start(copilotPsi);
-      IpVaultLogger.Log($"[IPVault] Copilot CLI lançado com sucesso.");
-    }
 
     private void ExtractFromProjectItems(ProjectItems items, Dictionary<string, string> vault)
     {
@@ -431,6 +301,12 @@ namespace IPVault
       {
         foreach (ProjectItem item in items)
         {
+          bool previousExternal = _isCurrentlyExternal;
+          if (string.Equals(item.Name, "External Dependencies", StringComparison.OrdinalIgnoreCase) ||
+              string.Equals(item.Name, "References", StringComparison.OrdinalIgnoreCase))
+          {
+            _isCurrentlyExternal = true;
+          }
           try
           {
             // Extrair nome do arquivo
@@ -447,6 +323,10 @@ namespace IPVault
             try { fcm = item.FileCodeModel; } catch { }
             string filePath = "";
             try { filePath = item.FileNames[1]; } catch { }
+            if (!string.IsNullOrEmpty(filePath))
+            {
+               _solutionFiles.Add(Path.GetFullPath(filePath));
+            }
             ExtractFromRawFile(filePath, vault);
 
             if (fcm != null)
@@ -477,6 +357,10 @@ namespace IPVault
           {
             IpVaultLogger.Log($"[IPVault] Error processing ProjectItem: {ex.Message}");
           }
+          finally
+          {
+            _isCurrentlyExternal = previousExternal;
+          }
         }
       }
       catch (Exception ex)
@@ -490,7 +374,7 @@ namespace IPVault
       try
       {
         ThreadHelper.ThrowIfNotOnUIThread();
-        if (element.InfoLocation != vsCMInfoLocation.vsCMInfoLocationProject) return;
+        if (!_isCurrentlyExternal && element.InfoLocation != vsCMInfoLocation.vsCMInfoLocationProject) return;
 
         string realName = element.Name;
         string intellisenseType = element.Kind.ToString();
@@ -572,6 +456,29 @@ namespace IPVault
             catch (Exception ex)
             {
               IpVaultLogger.Log($"[IPVault] Error processing namespace {realName}: {ex.Message}");
+            }
+            break;
+          case vsCMElement.vsCMElementMacro:
+            AddNameMapping(vault, filePath, realName, $"macro_{NumberToAlpha(macroCounter++).ToLower()}");
+            break;
+          case vsCMElement.vsCMElementTypeDef:
+          case vsCMElement.vsCMElementUnion:
+          case vsCMElement.vsCMElementDelegate:
+          case vsCMElement.vsCMElementMap:
+            AddNameMapping(vault, filePath, realName, $"Class{NumberToAlpha(classCounter++)}");
+            if (element.Children != null)
+            {
+              try
+              {
+                foreach (CodeElement child in element.Children)
+                {
+                  ProcessCodeElement(child, vault, filePath);
+                }
+              }
+              catch (Exception ex)
+              {
+                IpVaultLogger.Log($"[IPVault] Error processing children of {realName}: {ex.Message}");
+              }
             }
             break;
         }
@@ -739,6 +646,22 @@ namespace IPVault
         return;
       }
 
+      bool previousExternal = _isCurrentlyExternal;
+      string normalizedPath = fullPath.Replace('/', '\\');
+
+      // Heuristic 1: If it's explicitly in the solution, it's NOT external IP.
+      // Heuristic 2: If it's in a path containing "Include", "vcpkg_installed", "packages", or "External Dependencies", it IS external.
+      bool isKnownSolutionFile = _solutionFiles.Contains(fullPath);
+      bool isSuspectExternalPath = normalizedPath.IndexOf("\\Include\\", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                   normalizedPath.IndexOf("\\vcpkg_installed\\", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                   normalizedPath.IndexOf("\\packages\\", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                   normalizedPath.IndexOf("\\External Dependencies\\", StringComparison.OrdinalIgnoreCase) >= 0;
+
+      if (!isKnownSolutionFile || isSuspectExternalPath)
+      {
+        _isCurrentlyExternal = true;
+      }
+
       string content;
       try
       {
@@ -747,6 +670,7 @@ namespace IPVault
       catch (Exception ex)
       {
         IpVaultLogger.Log($"[IPVault] Error reading source file {fullPath}: {ex.Message}");
+        _isCurrentlyExternal = previousExternal;
         return;
       }
 
@@ -761,6 +685,7 @@ namespace IPVault
       AddEnumValueMappings(sanitizedContent, vault, fullPath);
       AddNamespaceMappings(sanitizedContent, vault, fullPath);
       AddShortIdentifierMappings(sanitizedContent, vault, fullPath);
+      _isCurrentlyExternal = previousExternal;
     }
 
     private void ExtractAdditionalProtoHeaders(Project project, Dictionary<string, string> vault)
@@ -968,6 +893,13 @@ namespace IPVault
         }
 
         string identifier = match.Value;
+
+        // Skip tokens smaller than or equal to 3 characters per user feedback
+        if (identifier.Length <= 3)
+        {
+          continue;
+        }
+
         TrackName(filePath, identifier, "raw_fallback_identifier");
 
         if (CppKeywords.Contains(identifier))
@@ -1177,8 +1109,15 @@ namespace IPVault
 
     private void AddNameMapping(Dictionary<string, string> vault, string filePath, string name, string mappedTo)
     {
-      AddIfMissing(vault, name, mappedTo);
-      MarkMapped(filePath, name);
+      if (_isCurrentlyExternal)
+      {
+        _externalVault.Add(name);
+      }
+      else
+      {
+        AddIfMissing(vault, name, mappedTo);
+        MarkMapped(filePath, name);
+      }
     }
 
     private void WriteExtractionLog(string solutionPath, Dictionary<string, string> vault)
