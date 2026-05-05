@@ -99,6 +99,55 @@ namespace IPVault
       _package = package;
     }
 
+    private async System.Threading.Tasks.Task SynchronizeExternalPdbsAsync(string targetPdbDir)
+    {
+      try
+      {
+        if (_package == null) return;
+        
+        var options = (IPVaultOptions)_package.GetDialogPage(typeof(IPVaultOptions));
+        string sourceDir = options.PdbDirectory;
+
+        if (string.IsNullOrWhiteSpace(sourceDir) || !Directory.Exists(sourceDir))
+        {
+          IpVaultLogger.Log("[IPVault] No valid external PDB directory configured. Skipping synchronization.");
+          return;
+        }
+
+        IpVaultLogger.Log($"[IPVault] Synchronizing PDBs from: {sourceDir} to {targetPdbDir}");
+        Directory.CreateDirectory(targetPdbDir);
+
+        var pdbFiles = Directory.GetFiles(sourceDir, "*.pdb", SearchOption.AllDirectories);
+        int copiedCount = 0;
+
+        foreach (var sourceFile in pdbFiles)
+        {
+          try
+          {
+            string fileName = Path.GetFileName(sourceFile);
+            string destFile = Path.Combine(targetPdbDir, fileName);
+
+            // Copy if doesn't exist or source is newer
+            if (!File.Exists(destFile) || File.GetLastWriteTimeUtc(sourceFile) > File.GetLastWriteTimeUtc(destFile))
+            {
+              File.Copy(sourceFile, destFile, true);
+              copiedCount++;
+            }
+          }
+          catch (Exception ex)
+          {
+            IpVaultLogger.Log($"[IPVault] Failed to copy PDB {sourceFile}: {ex.Message}");
+          }
+        }
+
+        IpVaultLogger.Log($"[IPVault] PDB synchronization complete. Copied {copiedCount} new/updated files.");
+      }
+      catch (Exception ex)
+      {
+        IpVaultLogger.Log($"[IPVault] Error during PDB synchronization: {ex.Message}");
+      }
+    }
+
     public async System.Threading.Tasks.Task<int> ExtractAndSaveVaultAsync()
     {
       try
@@ -122,6 +171,9 @@ namespace IPVault
 
         IpVaultLogger.Initialize(vsPath);
         IpVaultLogger.Log($"[IPVault] Starting PDB-based extraction...");
+
+        // 0. Synchronize external PDBs if configured
+        await SynchronizeExternalPdbsAsync(pdbDirPath);
 
         // 1. Gather all files in the current solution automatically
         IpVaultLogger.Log("[IPVault] Scanning solution for included files...");

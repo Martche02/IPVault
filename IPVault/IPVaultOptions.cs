@@ -17,5 +17,10 @@ namespace IPVault
         [DisplayName("Target Model")]
         [Description("Optional. Forces a specific model name to be sent to the LLM.")]
         public string TargetModel { get; set; } = "";
+
+        [Category("Zero-Trust Copilot")]
+        [DisplayName("External PDB Directory")]
+        [Description("Path to an external directory containing .pdb files to be used in the filter generation.")]
+        public string PdbDirectory { get; set; } = "";
     }
 }
