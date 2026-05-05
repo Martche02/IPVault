@@ -50,7 +50,7 @@ namespace IPVault
       _dte = dte;
 
       // 1. Hook de Guardar Documento (Ctrl+S)
-      _documentEvents = _dte.Events.DocumentEvents;
+      _documentEvents = _dte.Events.get_DocumentEvents(null);
       _documentEvents.DocumentSaved += OnDocumentSaved;
 
       // 2. Hook de Abrir Solução
