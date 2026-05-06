@@ -15,6 +15,7 @@ namespace IPVault
     {
         private Dictionary<string, string> _forwardMap = new Dictionary<string, string>();
         private Dictionary<string, string> _reverseMap = new Dictionary<string, string>();
+        private Dictionary<string, string> _dynamicReverseMap = new Dictionary<string, string>();
         private bool _isUpdating = false;
 
         public TestVaultWindow(DTE2 dte)
@@ -83,10 +84,28 @@ namespace IPVault
             try
             {
                 string text = TxtPlain.Text;
+                _dynamicReverseMap.Clear();
+                int strCounter = 1;
+                int commentCounter = 1;
+
+                // Tokenize comments
+                text = Regex.Replace(text, @"/\*[\s\S]*?\*/|//.*", match => {
+                    string token = $"Comment_{commentCounter++}";
+                    _dynamicReverseMap[token] = match.Value;
+                    return token;
+                });
+
+                // Tokenize strings and chars
+                text = Regex.Replace(text, @"""(?:[^""\\]|\\.)*""|'(?:[^'\\]|\\.)*'", match => {
+                    string token = $"Str_{strCounter++}";
+                    _dynamicReverseMap[token] = match.Value;
+                    return token;
+                });
+
                 foreach (var kvp in _forwardMap)
                 {
-                    // Escape key for regex and match as whole word
-                    string pattern = @"\b" + Regex.Escape(kvp.Key) + @"\b";
+                    // Custom boundary: start/end of string OR non-alphanumeric character
+                    string pattern = @"(?<=^|[^a-zA-Z0-9])" + Regex.Escape(kvp.Key) + @"(?=$|[^a-zA-Z0-9])";
                     text = Regex.Replace(text, pattern, kvp.Value);
                 }
                 TxtFiltered.Text = text;
@@ -104,13 +123,23 @@ namespace IPVault
             try
             {
                 string text = TxtFiltered.Text;
-                // Sort reverse keys to replace longer ones first
+                
+                // Restore Map Tokens
                 var sortedReverse = _reverseMap.OrderByDescending(k => k.Key.Length).ToList();
                 foreach (var kvp in sortedReverse)
                 {
-                    string pattern = @"\b" + Regex.Escape(kvp.Key) + @"\b";
+                    string pattern = @"(?<=^|[^a-zA-Z0-9])" + Regex.Escape(kvp.Key) + @"(?=$|[^a-zA-Z0-9])";
                     text = Regex.Replace(text, pattern, kvp.Value);
                 }
+
+                // Restore Dynamic Strings/Comments
+                var sortedDynamic = _dynamicReverseMap.OrderByDescending(k => k.Key.Length).ToList();
+                foreach (var kvp in sortedDynamic)
+                {
+                    string pattern = @"(?<=^|[^a-zA-Z0-9])" + Regex.Escape(kvp.Key) + @"(?=$|[^a-zA-Z0-9])";
+                    text = Regex.Replace(text, pattern, kvp.Value);
+                }
+
                 TxtPlain.Text = text;
             }
             finally
