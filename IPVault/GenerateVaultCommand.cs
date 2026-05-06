@@ -112,7 +112,13 @@ namespace IPVault
         "optional", "variant", "any", "function", "function_ref", "span", "string_view", "size_t", "ptrdiff_t", 
         "intptr_t", "uintptr_t", "int8_t", "int16_t", "int32_t", "int64_t", "uint8_t", "uint16_t", "uint32_t", "uint64_t",
         "__cdecl", "__stdcall", "__fastcall", "__thiscall", "__vectorcall", "__ptr64", "__ptr32", "__unaligned", 
-        "__sptr", "__uptr", "__declspec", "__forceinline", "__inline", "__w64", "__int8", "__int16", "__int32", "__int64"
+        "__sptr", "__uptr", "__declspec", "__forceinline", "__inline", "__w64", "__int8", "__int16", "__int32", "__int64",
+        "begin", "end", "cbegin", "cend", "rbegin", "rend", "crbegin", "crend", "size", "length", "empty", 
+        "clear", "insert", "erase", "push_back", "pop_back", "push_front", "pop_front", "emplace", "emplace_back", 
+        "emplace_front", "front", "back", "first", "second", "get", "make_pair", "make_tuple", "tie", "swap", 
+        "reserve", "capacity", "shrink_to_fit", "find", "count", "contains", "lower_bound", "upper_bound", 
+        "equal_range", "iterator", "const_iterator", "reverse_iterator", "const_reverse_iterator",
+        "value_type", "reference", "const_reference", "pointer", "const_pointer", "difference_type"
     };
 
     public VaultExtractor(DTE2 dte, AsyncPackage? package = null)
