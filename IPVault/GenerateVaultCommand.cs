@@ -364,6 +364,7 @@ namespace IPVault
             for (int i = 0; i < localSymbols.References.Count; i++)
             {
               var sym = localSymbols[i];
+              if (sym == null) continue;
               string name = GetNameFromSymbol(sym);
               if (string.IsNullOrEmpty(name) || name.Length <= 3) continue;
 
@@ -385,6 +386,7 @@ namespace IPVault
 
     private string GetNameFromSymbol(object sym)
     {
+      if (sym == null) return "";
       if (sym is ProcedureSymbol rs) return rs.Name.ToString();
       if (sym is Public32Symbol ps) return ps.Name.ToString();
       if (sym is DataSymbol ds) return ds.Name.ToString();
