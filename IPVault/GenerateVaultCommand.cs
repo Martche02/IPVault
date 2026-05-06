@@ -94,6 +94,27 @@ namespace IPVault
     private DTE2 _dte;
     private AsyncPackage? _package;
 
+    private static readonly HashSet<string> _cppKeywords = new HashSet<string>(StringComparer.Ordinal) 
+    {
+        "alignas", "alignof", "and", "and_eq", "asm", "atomic_cancel", "atomic_commit", "atomic_noexcept", 
+        "auto", "bitand", "bitor", "bool", "break", "case", "catch", "char", "char8_t", "char16_t", "char32_t", 
+        "class", "compl", "concept", "const", "consteval", "constexpr", "constinit", "const_cast", "continue", 
+        "co_await", "co_return", "co_yield", "decltype", "default", "delete", "do", "double", "dynamic_cast", 
+        "else", "enum", "explicit", "export", "extern", "false", "float", "for", "friend", "goto", "if", 
+        "inline", "int", "long", "mutable", "namespace", "new", "noexcept", "not", "not_eq", "nullptr", 
+        "operator", "or", "or_eq", "private", "protected", "public", "reflexpr", "register", "reinterpret_cast", 
+        "requires", "return", "short", "signed", "sizeof", "static", "static_assert", "static_cast", "struct", 
+        "switch", "synchronized", "template", "this", "thread_local", "throw", "true", "try", "typedef", 
+        "typeid", "typename", "union", "unsigned", "using", "virtual", "void", "volatile", "wchar_t", "while", 
+        "xor", "xor_eq", 
+        "std", "string", "vector", "map", "set", "list", "array", "deque", "unordered_map", "unordered_set", 
+        "shared_ptr", "unique_ptr", "weak_ptr", "allocator", "basic_string", "char_traits", "pair", "tuple", 
+        "optional", "variant", "any", "function", "function_ref", "span", "string_view", "size_t", "ptrdiff_t", 
+        "intptr_t", "uintptr_t", "int8_t", "int16_t", "int32_t", "int64_t", "uint8_t", "uint16_t", "uint32_t", "uint64_t",
+        "__cdecl", "__stdcall", "__fastcall", "__thiscall", "__vectorcall", "__ptr64", "__ptr32", "__unaligned", 
+        "__sptr", "__uptr", "__declspec", "__forceinline", "__inline", "__w64", "__int8", "__int16", "__int32", "__int64"
+    };
+
     public VaultExtractor(DTE2 dte, AsyncPackage? package = null)
     {
       _dte = dte;
@@ -328,14 +349,12 @@ namespace IPVault
 
     private void AddToBlacklist(string fullName, HashSet<string> blacklist)
     {
-        char[] separators = new char[] { ':', '.', '_', '<', '>', ',', ' ', '&', '*', '(', ')', '[', ']', '-', '+', '=', '~', '`', '\'', '\"', '\\', '/', '$', '@', '!' };
+        char[] separators = new char[] { '?', ':', '.', '_', '<', '>', ',', ' ', '&', '*', '(', ')', '[', ']', '-', '+', '=', '~', '`', '\'', '\"', '\\', '/', '$', '@', '!' };
         string[] parts = fullName.Split(separators, StringSplitOptions.RemoveEmptyEntries);
         foreach (var part in parts)
         {
-            if (!string.IsNullOrEmpty(part) && !long.TryParse(part, out _))
-            {
-                blacklist.Add(part);
-            }
+            if (string.IsNullOrEmpty(part) || char.IsDigit(part[0])) continue;
+            blacklist.Add(part);
         }
     }
 
@@ -375,9 +394,6 @@ namespace IPVault
               string fullName = GetNameFromSymbol(sym);
               if (string.IsNullOrEmpty(fullName)) continue;
 
-              // Filter header-only STL instantiations
-              if (fullName.Contains("std::") || fullName.Contains("__gnu_cxx::")) continue;
-
               string type = "Var";
               if (sym is ProcedureSymbol) type = "Func";
               else if (sym is ConstantSymbol || sym is LocalSymbol || sym is DataSymbol) type = "Var"; 
@@ -389,6 +405,29 @@ namespace IPVault
 
               AddProcessedNames(fullName, type, ipNames, blacklist);
             }
+          }
+
+          // Process GlobalsStream to catch enums and global types not bound to local module streams
+          if (pdb.GlobalsStream != null && pdb.GlobalsStream.Symbols != null)
+          {
+              for (int i = 0; i < pdb.GlobalsStream.Symbols.Count; i++)
+              {
+                  var sym = pdb.GlobalsStream.Symbols[i];
+                  if (sym == null) continue;
+                  string fullName = GetNameFromSymbol(sym);
+                  if (string.IsNullOrEmpty(fullName)) continue;
+
+                  string type = "Var";
+                  if (sym is ProcedureSymbol) type = "Func";
+                  else if (sym is ConstantSymbol || sym is LocalSymbol || sym is DataSymbol) type = "Var"; 
+                  else if (sym is UdtSymbol us) 
+                  {
+                      type = "Class";
+                      ExtractMembersFromUdt(pdb, us, ipNames, blacklist);
+                  }
+
+                  AddProcessedNames(fullName, type, ipNames, blacklist);
+              }
           }
         }
       }
@@ -455,18 +494,20 @@ namespace IPVault
 
     private void AddProcessedNames(string fullName, string defaultType, Dictionary<string, string> ipNames, HashSet<string>? blacklist)
     {
-        char[] separators = new char[] { ':', '.', '_', '<', '>', ',', ' ', '&', '*', '(', ')', '[', ']', '-', '+', '=', '~', '`', '\'', '\"', '\\', '/', '$', '@', '!' };
+        char[] separators = new char[] { '?', ':', '.', '_', '<', '>', ',', ' ', '&', '*', '(', ')', '[', ']', '-', '+', '=', '~', '`', '\'', '\"', '\\', '/', '$', '@', '!' };
         string[] parts = fullName.Split(separators, StringSplitOptions.RemoveEmptyEntries);
         
         foreach (string part in parts)
         {
             if (string.IsNullOrEmpty(part)) continue;
-            if (long.TryParse(part, out _)) continue;
+            
+            // Filter MSVC mangling artifacts and pure numbers (valid identifiers don't start with digits)
+            if (char.IsDigit(part[0])) continue;
+            
             // Apply blacklist if provided
             if (blacklist != null && blacklist.Contains(part)) continue;
             
-            // Hardcoded keyword filter to catch intrinsic types that PDBs don't blacklist
-            if (IsCppKeyword(part)) continue;
+            if (_cppKeywords.Contains(part)) continue;
 
             if (!ipNames.ContainsKey(part))
             {
@@ -475,12 +516,6 @@ namespace IPVault
                 ipNames[part] = type;
             }
         }
-    }
-
-    private bool IsCppKeyword(string name)
-    {
-        string[] keywords = { "alignas", "alignof", "and", "and_eq", "asm", "auto", "bitand", "bitor", "bool", "break", "case", "catch", "char", "char8_t", "char16_t", "char32_t", "class", "compl", "concept", "const", "consteval", "constexpr", "constinit", "const_cast", "continue", "co_await", "co_return", "co_yield", "decltype", "default", "delete", "do", "double", "dynamic_cast", "else", "enum", "explicit", "export", "extern", "false", "float", "for", "friend", "goto", "if", "inline", "int", "long", "mutable", "namespace", "new", "noexcept", "not", "not_eq", "nullptr", "operator", "or", "or_eq", "private", "protected", "public", "register", "reinterpret_cast", "requires", "return", "short", "signed", "sizeof", "static", "static_assert", "static_cast", "struct", "switch", "template", "this", "thread_local", "throw", "true", "try", "typedef", "typeid", "typename", "union", "unsigned", "using", "virtual", "void", "volatile", "wchar_t", "while", "xor", "xor_eq", "string" };
-        return Array.BinarySearch(keywords, name) >= 0 || keywords.Contains(name);
     }
 
     private string GetNameFromSymbol(object sym)
