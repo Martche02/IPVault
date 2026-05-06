@@ -36,6 +36,7 @@ namespace IPVault
       await this.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
       await GenerateVaultCommand.InitializeAsync(this);
       await RunGeminiCommand.InitializeAsync(this);
+      await TestVaultCommand.InitializeAsync(this);
       IpVaultLogger.Log("[IPVault] Command initialization completed.");
 
       DTE2? dte = await GetServiceAsync(typeof(DTE)) as DTE2

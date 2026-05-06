@@ -66,6 +66,13 @@
           <ButtonText>Run Gemini</ButtonText>
         </Strings>
       </Button>
+      <Button guid="guidIPVaultPackageCmdSet" id="TestVaultCommandId" priority="0x0300" type="Button">
+        <Parent guid="guidIPVaultPackageCmdSet" id="MyMenuGroup" />
+        <Icon guid="guidImages" id="bmpPicArrows" />
+        <Strings>
+          <ButtonText>Test IP Vault Filter</ButtonText>
+        </Strings>
+      </Button>
     </Buttons>
 
     <!--The bitmaps section is used to define the bitmaps that are used for the commands.-->
@@ -87,6 +94,7 @@
       <IDSymbol name="MyMenuGroup" value="0x1020" />
       <IDSymbol name="GenerateVaultCommandId" value="0x0100" />
       <IDSymbol name="RunGeminiCommandId" value="0x0101" />
+      <IDSymbol name="TestVaultCommandId" value="0x0102" />
     </GuidSymbol>
 
     <GuidSymbol name="guidImages" value="{d3843d84-eaf8-4dc5-9365-60a485e4156c}" >
