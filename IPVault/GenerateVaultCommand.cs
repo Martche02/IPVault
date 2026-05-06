@@ -14,6 +14,7 @@ using System.Text.RegularExpressions;
 using System.Linq;
 using SharpPdb.Windows;
 using SharpPdb.Windows.SymbolRecords;
+using SharpPdb.Windows.TypeRecords;
 
 namespace IPVault
 {
@@ -184,25 +185,27 @@ namespace IPVault
                 GatherFilesFromProjectItems(project.ProjectItems, solutionFiles);
         }
         
-        // 2. "Put them there": Save to WhiteList.json as requested
+        // 2. Save to WhiteList.json
         SaveFileList(solutionFiles, whitelistPath);
         IpVaultLogger.Log($"[IPVault] Solution scan complete. Found {solutionFiles.Count} files. Whitelist updated.");
 
-        // 3. Load Whitelist (now as individual files)
-        List<string> whitelist = solutionFiles.ToList();
+        // 3. Build Blacklist from Non-Proprietary Modules in all PDBs
+        HashSet<string> blacklist = new HashSet<string>(StringComparer.Ordinal);
+        string[] pdbFiles = Directory.Exists(pdbDirPath) ? Directory.GetFiles(pdbDirPath, "*.pdb") : new string[0];
         
-        HashSet<string> ipNames = new HashSet<string>(StringComparer.Ordinal);
-        Dictionary<string, string> ipNameWithTypes = new Dictionary<string, string>(StringComparer.Ordinal);
-
-        // 4. Process PDBs
-        if (Directory.Exists(pdbDirPath))
+        IpVaultLogger.Log("[IPVault] Building blacklist from external PDB modules...");
+        foreach (string pdbPath in pdbFiles)
         {
-          string[] pdbFiles = Directory.GetFiles(pdbDirPath, "*.pdb");
-          foreach (string pdbPath in pdbFiles)
-          {
-            IpVaultLogger.Log($"[IPVault] Parsing PDB: {pdbPath}");
-            ExtractFromPdb(pdbPath, whitelist, ipNameWithTypes);
-          }
+            BuildBlacklistFromPdb(pdbPath, solutionFiles, blacklist);
+        }
+        IpVaultLogger.Log($"[IPVault] Blacklist built with {blacklist.Count} terms.");
+
+        // 4. Process PDBs for Proprietary Symbols
+        Dictionary<string, string> ipNameWithTypes = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (string pdbPath in pdbFiles)
+        {
+          IpVaultLogger.Log($"[IPVault] Parsing PDB for proprietary symbols: {pdbPath}");
+          ExtractProprietaryFromPdb(pdbPath, solutionFiles, blacklist, ipNameWithTypes);
         }
 
         // 5. IntelliSense Extraction
@@ -229,6 +232,398 @@ namespace IPVault
       }
     }
 
+    private bool IsFileProprietary(string filePath, HashSet<string> whitelistSet)
+    {
+        if (string.IsNullOrEmpty(filePath)) return false;
+        
+        string fullPath;
+        try { fullPath = Path.GetFullPath(filePath); }
+        catch { return false; }
+
+        if (whitelistSet.Contains(fullPath)) return true;
+
+        if (fullPath.EndsWith(".pb.h", StringComparison.OrdinalIgnoreCase) || 
+            fullPath.EndsWith(".pb.cc", StringComparison.OrdinalIgnoreCase))
+        {
+            string fileName = Path.GetFileName(fullPath);
+            if (fileName.EndsWith(".pb.h", StringComparison.OrdinalIgnoreCase)) 
+                fileName = fileName.Substring(0, fileName.Length - 5);
+            else if (fileName.EndsWith(".pb.cc", StringComparison.OrdinalIgnoreCase)) 
+                fileName = fileName.Substring(0, fileName.Length - 6);
+
+            string expected = "\\" + fileName + ".proto";
+            return whitelistSet.Any(w => w.EndsWith(expected, StringComparison.OrdinalIgnoreCase));
+        }
+
+        return false;
+    }
+
+    private void BuildBlacklistFromPdb(string pdbPath, HashSet<string> whitelistSet, HashSet<string> blacklist)
+    {
+      try
+      {
+        using (var pdb = new PdbFile(pdbPath))
+        {
+          var dbi = pdb.DbiStream;
+          if (dbi == null) return;
+
+          foreach (var module in dbi.Modules)
+          {
+            bool isProprietary = false;
+            if (module.Files != null)
+            {
+              foreach (var sf in module.Files)
+              {
+                if (IsFileProprietary(sf, whitelistSet))
+                {
+                  isProprietary = true;
+                  break;
+                }
+              }
+            }
+
+            // If module is purely external, add only Types and Functions to blacklist to avoid polluting with common variable names
+            if (!isProprietary)
+            {
+              var localSymbols = module.LocalSymbolStream;
+              if (localSymbols == null || localSymbols.References == null) continue;
+
+              for (int i = 0; i < localSymbols.References.Count; i++)
+              {
+                var sym = localSymbols[i];
+                if (sym is UdtSymbol || sym is ProcedureSymbol)
+                {
+                    string name = GetNameFromSymbol(sym);
+                    if (!string.IsNullOrEmpty(name)) AddToBlacklist(name, blacklist);
+                }
+              }
+            }
+          }
+
+          // Global and Public symbols in what we assume are system PDBs are also blacklisted
+          bool pdbHasProprietary = dbi.Modules.Any(m => m.Files != null && m.Files.Any(f => IsFileProprietary(f, whitelistSet)));
+          if (!pdbHasProprietary)
+          {
+              if (pdb.GlobalsStream != null && pdb.GlobalsStream.Symbols != null)
+              {
+                  for (int i = 0; i < pdb.GlobalsStream.Symbols.Count; i++)
+                  {
+                      string name = GetNameFromSymbol(pdb.GlobalsStream.Symbols[i]);
+                      if (!string.IsNullOrEmpty(name)) AddToBlacklist(name, blacklist);
+                  }
+              }
+              if (pdb.PublicsStream != null && pdb.PublicsStream.PublicSymbols != null)
+              {
+                  foreach (var ps in pdb.PublicsStream.PublicSymbols)
+                  {
+                      string name = GetNameFromSymbol(ps);
+                      if (!string.IsNullOrEmpty(name)) AddToBlacklist(name, blacklist);
+                  }
+              }
+          }
+        }
+      }
+      catch { }
+    }
+
+    private void AddToBlacklist(string fullName, HashSet<string> blacklist)
+    {
+        char[] separators = new char[] { ':', '.', '_', '<', '>', ',', ' ', '&', '*', '(', ')', '[', ']', '-', '+', '=', '~', '`', '\'', '\"', '\\', '/', '$', '@', '!' };
+        string[] parts = fullName.Split(separators, StringSplitOptions.RemoveEmptyEntries);
+        foreach (var part in parts)
+        {
+            if (!string.IsNullOrEmpty(part) && !long.TryParse(part, out _))
+            {
+                blacklist.Add(part);
+            }
+        }
+    }
+
+    private void ExtractProprietaryFromPdb(string pdbPath, HashSet<string> whitelistSet, HashSet<string> blacklist, Dictionary<string, string> ipNames)
+    {
+      try
+      {
+        using (var pdb = new PdbFile(pdbPath))
+        {
+          var dbi = pdb.DbiStream;
+          if (dbi == null) return;
+
+          foreach (var module in dbi.Modules)
+          {
+            bool isProprietary = false;
+            if (module.Files != null)
+            {
+              foreach (var sf in module.Files)
+              {
+                if (IsFileProprietary(sf, whitelistSet))
+                {
+                  isProprietary = true;
+                  break;
+                }
+              }
+            }
+
+            if (!isProprietary) continue;
+
+            var localSymbols = module.LocalSymbolStream;
+            if (localSymbols == null || localSymbols.References == null) continue;
+
+            for (int i = 0; i < localSymbols.References.Count; i++)
+            {
+              var sym = localSymbols[i];
+              if (sym == null) continue;
+              string fullName = GetNameFromSymbol(sym);
+              if (string.IsNullOrEmpty(fullName)) continue;
+
+              // Filter header-only STL instantiations
+              if (fullName.Contains("std::") || fullName.Contains("__gnu_cxx::")) continue;
+
+              string type = "Var";
+              if (sym is ProcedureSymbol) type = "Func";
+              else if (sym is ConstantSymbol || sym is LocalSymbol || sym is DataSymbol) type = "Var"; 
+              else if (sym is UdtSymbol us) 
+              {
+                  type = "Class";
+                  ExtractMembersFromUdt(pdb, us, ipNames, blacklist);
+              }
+
+              AddProcessedNames(fullName, type, ipNames, blacklist);
+            }
+          }
+        }
+      }
+      catch (Exception ex)
+      {
+        IpVaultLogger.Log($"[IPVault] Error reading PDB {pdbPath}: {ex.Message}");
+      }
+    }
+
+    private void ExtractMembersFromUdt(PdbFile pdb, UdtSymbol us, Dictionary<string, string> ipNames, HashSet<string> blacklist)
+    {
+        try
+        {
+            var tpi = pdb.TpiStream;
+            if (tpi == null) return;
+            
+            var typeRecord = tpi[us.Type];
+            TypeIndex fieldListIndex = default;
+
+            if (typeRecord is ClassRecord cr)
+            {
+                fieldListIndex = cr.FieldList;
+            }
+            else if (typeRecord is EnumRecord er)
+            {
+                fieldListIndex = er.FieldList;
+            }
+            
+            if (fieldListIndex == default) return;
+            
+            var fieldListRecord = tpi[fieldListIndex] as FieldListRecord;
+            if (fieldListRecord == null || fieldListRecord.Fields == null) return;
+
+            foreach (var field in fieldListRecord.Fields)
+            {
+                if (field is DataMemberRecord dmr)
+                {
+                    string fieldName = dmr.Name.ToString();
+                    if (!string.IsNullOrEmpty(fieldName))
+                    {
+                        AddProcessedNames(fieldName, "Var", ipNames, blacklist);
+                    }
+                }
+                else if (field is EnumeratorRecord enr)
+                {
+                    string enumName = enr.Name.ToString();
+                    if (!string.IsNullOrEmpty(enumName))
+                    {
+                        AddProcessedNames(enumName, "Enum", ipNames, blacklist);
+                    }
+                }
+                else 
+                {
+                    string name = GetNameFromSymbol(field);
+                    if (!string.IsNullOrEmpty(name))
+                    {
+                        AddProcessedNames(name, "Var", ipNames, blacklist);
+                    }
+                }
+            }
+        }
+        catch {}
+    }
+
+    private void AddProcessedNames(string fullName, string defaultType, Dictionary<string, string> ipNames, HashSet<string>? blacklist)
+    {
+        char[] separators = new char[] { ':', '.', '_', '<', '>', ',', ' ', '&', '*', '(', ')', '[', ']', '-', '+', '=', '~', '`', '\'', '\"', '\\', '/', '$', '@', '!' };
+        string[] parts = fullName.Split(separators, StringSplitOptions.RemoveEmptyEntries);
+        
+        foreach (string part in parts)
+        {
+            if (string.IsNullOrEmpty(part)) continue;
+            if (long.TryParse(part, out _)) continue;
+            // Apply blacklist if provided
+            if (blacklist != null && blacklist.Contains(part)) continue;
+            
+            // Hardcoded keyword filter to catch intrinsic types that PDBs don't blacklist
+            if (IsCppKeyword(part)) continue;
+
+            if (!ipNames.ContainsKey(part))
+            {
+                string type = defaultType;
+                if (parts.Length > 1 && part != parts.Last()) type = "Class"; 
+                ipNames[part] = type;
+            }
+        }
+    }
+
+    private bool IsCppKeyword(string name)
+    {
+        string[] keywords = { "alignas", "alignof", "and", "and_eq", "asm", "auto", "bitand", "bitor", "bool", "break", "case", "catch", "char", "char8_t", "char16_t", "char32_t", "class", "compl", "concept", "const", "consteval", "constexpr", "constinit", "const_cast", "continue", "co_await", "co_return", "co_yield", "decltype", "default", "delete", "do", "double", "dynamic_cast", "else", "enum", "explicit", "export", "extern", "false", "float", "for", "friend", "goto", "if", "inline", "int", "long", "mutable", "namespace", "new", "noexcept", "not", "not_eq", "nullptr", "operator", "or", "or_eq", "private", "protected", "public", "register", "reinterpret_cast", "requires", "return", "short", "signed", "sizeof", "static", "static_assert", "static_cast", "struct", "switch", "template", "this", "thread_local", "throw", "true", "try", "typedef", "typeid", "typename", "union", "unsigned", "using", "virtual", "void", "volatile", "wchar_t", "while", "xor", "xor_eq", "string" };
+        return Array.BinarySearch(keywords, name) >= 0 || keywords.Contains(name);
+    }
+
+    private string GetNameFromSymbol(object sym)
+    {
+      if (sym == null) return "";
+      if (sym is ProcedureSymbol rs) return rs.Name.ToString();
+      if (sym is Public32Symbol ps) return ps.Name.ToString();
+      if (sym is DataSymbol ds) return ds.Name.ToString();
+      if (sym is ConstantSymbol cs) return cs.Name.ToString();
+      if (sym is UdtSymbol us) return us.Name.ToString();
+      if (sym is LocalSymbol ls) return ls.Name.ToString();
+      if (sym is EnumeratorRecord er) return er.Name.ToString();
+      if (sym is DataMemberRecord dmr) return dmr.Name.ToString();
+      
+      try
+      {
+          var prop = sym.GetType().GetProperty("Name");
+          if (prop != null) return prop.GetValue(sym)?.ToString() ?? "";
+          var field = sym.GetType().GetField("Name");
+          if (field != null) return field.GetValue(sym)?.ToString() ?? "";
+      } catch {}
+
+      return "";
+    }
+
+    private void ExtractFromIntelliSense(ProjectItems items, HashSet<string> whitelist, Dictionary<string, string> ipNames)
+    {
+      ThreadHelper.ThrowIfNotOnUIThread();
+      if (items == null) return;
+
+      foreach (ProjectItem item in items)
+      {
+        try
+        {
+          bool isProprietary = false;
+          for (short i = 1; i <= item.FileCount; i++)
+          {
+            try
+            {
+              string path = item.FileNames[i];
+              if (IsFileProprietary(path, whitelist))
+              {
+                isProprietary = true;
+                break;
+              }
+            }
+            catch { }
+          }
+
+          if (isProprietary && item.FileCodeModel != null)
+          {
+            foreach (CodeElement element in item.FileCodeModel.CodeElements)
+            {
+              ProcessCodeElement(element, ipNames);
+            }
+          }
+
+          if (item.ProjectItems != null) ExtractFromIntelliSense(item.ProjectItems, whitelist, ipNames);
+          if (item.SubProject != null && item.SubProject.ProjectItems != null)
+            ExtractFromIntelliSense(item.SubProject.ProjectItems, whitelist, ipNames);
+        }
+        catch { }
+      }
+    }
+
+    private void ProcessCodeElement(CodeElement element, Dictionary<string, string> ipNames)
+    {
+      ThreadHelper.ThrowIfNotOnUIThread();
+      try
+      {
+        string fullName = element.FullName;
+        if (string.IsNullOrEmpty(fullName)) fullName = element.Name;
+
+        if (!string.IsNullOrEmpty(fullName))
+        {
+          string type = "";
+          switch (element.Kind)
+          {
+            case vsCMElement.vsCMElementClass:
+            case vsCMElement.vsCMElementStruct:
+              type = "Class";
+              break;
+            case vsCMElement.vsCMElementFunction:
+              type = "Func";
+              break;
+            case vsCMElement.vsCMElementVariable:
+              type = "Var";
+              break;
+            case vsCMElement.vsCMElementEnum:
+              type = "Enum";
+              break;
+            case vsCMElement.vsCMElementMacro:
+              type = "Macro";
+              break;
+            case vsCMElement.vsCMElementProperty:
+              type = "Property";
+              break;
+            case vsCMElement.vsCMElementTypeDef:
+              type = "Typedef";
+              break;
+            case vsCMElement.vsCMElementNamespace:
+              type = "Class";
+              break;
+          }
+
+          if (!string.IsNullOrEmpty(type))
+          {
+              // Bypass blacklist for IntelliSense (pass null)
+              AddProcessedNames(fullName, type, ipNames, null);
+          }
+        }
+
+        if (element.Kind == vsCMElement.vsCMElementNamespace || 
+            element.Kind == vsCMElement.vsCMElementClass || 
+            element.Kind == vsCMElement.vsCMElementStruct ||
+            element.Kind == vsCMElement.vsCMElementEnum)
+        {
+            foreach (CodeElement child in element.Children)
+            {
+                ProcessCodeElement(child, ipNames);
+            }
+        }
+      }
+      catch { }
+    }
+
+    private Dictionary<string, string> GenerateTokenMap(Dictionary<string, string> names)
+    {
+      var map = new Dictionary<string, string>(StringComparer.Ordinal);
+      var counters = new Dictionary<string, int> { 
+          {"Class", 1}, {"Var", 1}, {"Func", 1}, {"Enum", 1}, {"Macro", 1}, {"File", 1}, {"Property", 1}, {"Typedef", 1} 
+      };
+      
+      var sortedNames = names.Keys.OrderBy(n => n).ToList();
+      foreach (var name in sortedNames)
+      {
+        if (name == "main") continue;
+        string type = names[name];
+        map[name] = $"{type}_{counters[type]++}";
+      }
+      return map;
+    }
+
     private void GatherFilesFromProjectItems(ProjectItems items, HashSet<string> fileList)
     {
       ThreadHelper.ThrowIfNotOnUIThread();
@@ -243,7 +638,18 @@ namespace IPVault
             try
             {
               string path = item.FileNames[i];
-              if (!string.IsNullOrEmpty(path)) fileList.Add(Path.GetFullPath(path));
+              if (!string.IsNullOrEmpty(path))
+              {
+                string fullPath = Path.GetFullPath(path);
+                fileList.Add(fullPath);
+
+                // Protocol Buffer Mapping: .proto -> .pb.h
+                if (fullPath.EndsWith(".proto", StringComparison.OrdinalIgnoreCase))
+                {
+                    string pbhPath = Path.ChangeExtension(fullPath, ".pb.h");
+                    fileList.Add(pbhPath);
+                }
+              }
             }
             catch { }
           }
@@ -310,214 +716,6 @@ namespace IPVault
             File.WriteAllText(path, sb.ToString());
         }
         catch { }
-    }
-
-    private List<string> LoadWhitelist(string path)
-    {
-      try
-      {
-        if (!File.Exists(path)) return new List<string>();
-        string content = File.ReadAllText(path);
-        var matches = Regex.Matches(content, "\"([^\"]+)\"");
-        var list = new List<string>();
-        foreach (Match m in matches)
-        {
-          string file = m.Groups[1].Value.Replace("\\\\", "\\");
-          list.Add(Path.GetFullPath(file));
-        }
-        return list;
-      }
-      catch { return new List<string>(); }
-    }
-
-    private void ExtractFromPdb(string pdbPath, List<string> whitelist, Dictionary<string, string> ipNames)
-    {
-      HashSet<string> whitelistSet = new HashSet<string>(whitelist, StringComparer.OrdinalIgnoreCase);
-      try
-      {
-        using (var pdb = new PdbFile(pdbPath))
-        {
-          var dbi = pdb.DbiStream;
-          if (dbi == null) return;
-
-          foreach (var module in dbi.Modules)
-          {
-            bool moduleIsProprietary = false;
-            var sourceFiles = module.Files;
-            if (sourceFiles != null)
-            {
-              foreach (var sf in sourceFiles)
-              {
-                if (whitelistSet.Contains(Path.GetFullPath(sf)))
-                {
-                  moduleIsProprietary = true;
-                  break;
-                }
-              }
-            }
-
-            if (!moduleIsProprietary) continue;
-
-            var localSymbols = module.LocalSymbolStream;
-            if (localSymbols == null || localSymbols.References == null) continue;
-
-            for (int i = 0; i < localSymbols.References.Count; i++)
-            {
-              var sym = localSymbols[i];
-              if (sym == null) continue;
-              string name = GetNameFromSymbol(sym);
-              if (string.IsNullOrEmpty(name) || name.Length <= 3) continue;
-
-              string type = "Var";
-              if (sym is ProcedureSymbol) type = "Func";
-              else if (sym is UdtSymbol) type = "Class";
-              else if (sym is ConstantSymbol) type = "Var"; 
-
-              if (!ipNames.ContainsKey(name)) ipNames[name] = type;
-            }
-          }
-        }
-      }
-      catch (Exception ex)
-      {
-        IpVaultLogger.Log($"[IPVault] Error reading PDB {pdbPath}: {ex.Message}");
-      }
-    }
-
-    private string GetNameFromSymbol(object sym)
-    {
-      if (sym == null) return "";
-      if (sym is ProcedureSymbol rs) return rs.Name.ToString();
-      if (sym is Public32Symbol ps) return ps.Name.ToString();
-      if (sym is DataSymbol ds) return ds.Name.ToString();
-      if (sym is ConstantSymbol cs) return cs.Name.ToString();
-      if (sym is UdtSymbol us) return us.Name.ToString();
-      
-      try
-      {
-          var prop = sym.GetType().GetProperty("Name");
-          if (prop != null) return prop.GetValue(sym)?.ToString() ?? "";
-          var field = sym.GetType().GetField("Name");
-          if (field != null) return field.GetValue(sym)?.ToString() ?? "";
-      } catch {}
-
-      return "";
-    }
-
-    private void ExtractFromIntelliSense(ProjectItems items, HashSet<string> whitelist, Dictionary<string, string> ipNames)
-    {
-      ThreadHelper.ThrowIfNotOnUIThread();
-      if (items == null) return;
-
-      foreach (ProjectItem item in items)
-      {
-        try
-        {
-          bool isProprietary = false;
-          for (short i = 1; i <= item.FileCount; i++)
-          {
-            try
-            {
-              string path = item.FileNames[i];
-              if (!string.IsNullOrEmpty(path) && whitelist.Contains(Path.GetFullPath(path)))
-              {
-                isProprietary = true;
-                break;
-              }
-            }
-            catch { }
-          }
-
-          if (isProprietary && item.FileCodeModel != null)
-          {
-            foreach (CodeElement element in item.FileCodeModel.CodeElements)
-            {
-              ProcessCodeElement(element, ipNames);
-            }
-          }
-
-          if (item.ProjectItems != null) ExtractFromIntelliSense(item.ProjectItems, whitelist, ipNames);
-          if (item.SubProject != null && item.SubProject.ProjectItems != null)
-            ExtractFromIntelliSense(item.SubProject.ProjectItems, whitelist, ipNames);
-        }
-        catch { }
-      }
-    }
-
-    private void ProcessCodeElement(CodeElement element, Dictionary<string, string> ipNames)
-    {
-      ThreadHelper.ThrowIfNotOnUIThread();
-      try
-      {
-        string name = element.Name;
-        if (!string.IsNullOrEmpty(name) && name.Length > 3 && !ipNames.ContainsKey(name))
-        {
-          string type = "";
-          switch (element.Kind)
-          {
-            case vsCMElement.vsCMElementClass:
-            case vsCMElement.vsCMElementStruct:
-              type = "Class";
-              break;
-            case vsCMElement.vsCMElementFunction:
-              type = "Func";
-              break;
-            case vsCMElement.vsCMElementVariable:
-              type = "Var";
-              break;
-            case vsCMElement.vsCMElementEnum:
-              type = "Enum";
-              break;
-            case vsCMElement.vsCMElementMacro:
-              type = "Macro";
-              break;
-            case vsCMElement.vsCMElementProperty:
-              type = "Property";
-              break;
-            case vsCMElement.vsCMElementTypeDef:
-              type = "Typedef";
-              break;
-          }
-
-          if (!string.IsNullOrEmpty(type)) ipNames[name] = type;
-        }
-
-        // Recurse into children (namespaces, classes, etc.)
-        if (element.Kind == vsCMElement.vsCMElementNamespace || 
-            element.Kind == vsCMElement.vsCMElementClass || 
-            element.Kind == vsCMElement.vsCMElementStruct ||
-            element.Kind == vsCMElement.vsCMElementEnum)
-        {
-            foreach (CodeElement child in element.Children)
-            {
-                ProcessCodeElement(child, ipNames);
-            }
-        }
-      }
-      catch { }
-    }
-
-    private Dictionary<string, string> GenerateTokenMap(Dictionary<string, string> names)
-    {
-      var map = new Dictionary<string, string>(StringComparer.Ordinal);
-      var counters = new Dictionary<string, int> { 
-          {"Class", 1}, {"Var", 1}, {"Func", 1}, {"Enum", 1}, {"Macro", 1}, {"File", 1}, {"Property", 1}, {"Typedef", 1} 
-      };
-      
-      var sortedNames = names.Keys.OrderBy(n => n).ToList();
-      foreach (var name in sortedNames)
-      {
-        if (IsReserved(name)) continue;
-        string type = names[name];
-        map[name] = $"{type}_{counters[type]++}";
-      }
-      return map;
-    }
-
-    private bool IsReserved(string name)
-    {
-       string[] reserved = { "main", "std", "void", "int", "char", "bool", "float", "double" };
-       return reserved.Contains(name);
     }
 
     private string SerializeJson(Dictionary<string, string> dict)

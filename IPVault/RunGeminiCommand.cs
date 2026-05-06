@@ -82,16 +82,16 @@ namespace IPVault
                     {
                         // 1. Open the standard Visual Studio Integrated Terminal
                         dte.ExecuteCommand("View.Terminal");
-                        
+
                         // Give the terminal a moment to initialize and gain focus
                         await Task.Delay(1000);
 
                         // 2. Use PowerShell to force the clipboard (bypasses all VS/.NET COM locks)
-                        try 
+                        try
                         {
                             // Escaping any single quotes in the command just in case (though geminiCmd uses double quotes)
                             string escapedCmd = geminiCmd.Replace("'", "''");
-                            
+
                             var psiCb = new System.Diagnostics.ProcessStartInfo("powershell.exe")
                             {
                                 Arguments = $"-NoProfile -Command \"Set-Clipboard -Value '{escapedCmd}'\"",
@@ -99,10 +99,10 @@ namespace IPVault
                                 UseShellExecute = false
                             };
                             System.Diagnostics.Process.Start(psiCb)?.WaitForExit();
-                            
+
                             // A tiny delay to ensure the OS has registered the clipboard change
                             await Task.Delay(100);
-                            
+
                             // Send Ctrl+V and Enter
                             System.Windows.Forms.SendKeys.SendWait("^v{ENTER}");
                         }
@@ -112,13 +112,13 @@ namespace IPVault
                             // Absolute last resort: type it out and pray the keyboard layout accepts it
                             System.Windows.Forms.SendKeys.SendWait(geminiCmd.Replace("{", "{{}").Replace("}", "{}}") + "{ENTER}");
                         }
-                        
+
                         IpVaultLogger.Log($"[IPVault] Gemini launched in standard integrated terminal.");
                     }
                     catch (Exception dteEx)
                     {
                         IpVaultLogger.Log($"[IPVault] Failed to use integrated terminal: {dteEx.Message}. Falling back to external window.");
-                        
+
                         // Fallback to external window if the DTE command fails (e.g. older VS versions)
                         System.Diagnostics.ProcessStartInfo psi = new System.Diagnostics.ProcessStartInfo("powershell.exe")
                         {
