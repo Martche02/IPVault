@@ -599,20 +599,35 @@ namespace IPVault
     private string GetNameFromSymbol(object sym)
     {
       if (sym == null) return "";
+      
+      // SymbolRecords
       if (sym is ProcedureSymbol rs) return rs.Name.ToString();
       if (sym is Public32Symbol ps) return ps.Name.ToString();
       if (sym is DataSymbol ds) return ds.Name.ToString();
       if (sym is ConstantSymbol cs) return cs.Name.ToString();
       if (sym is UdtSymbol us) return us.Name.ToString();
       if (sym is LocalSymbol ls) return ls.Name.ToString();
+      if (sym is RegisterRelativeSymbol rrs) return rrs.Name.ToString();
+      if (sym is ThreadLocalDataSymbol tds) return tds.Name.ToString();
+      if (sym is FileStaticSymbol fss) return fss.Name.ToString();
+      if (sym is ExportSymbol es) return es.Name.ToString();
+      if (sym is BlockSymbol bs) return bs.Name.ToString();
+      if (sym is LabelSymbol lsym) return lsym.Name.ToString();
+      if (sym is ManagedProcedureSymbol mps) return mps.Name.ToString();
+      if (sym is ObjectNameSymbol ons) return ons.Name.ToString();
+      if (sym is Thunk32Symbol t32s) return t32s.Name.ToString();
+
+      // TypeRecords
       if (sym is EnumeratorRecord er) return er.Name.ToString();
       if (sym is DataMemberRecord dmr) return dmr.Name.ToString();
+      if (sym is EnumRecord enr) return enr.Name.ToString();
+      if (sym is ClassRecord cr) return cr.Name.ToString();
 
       try
       {
-          var prop = sym.GetType().GetProperty("Name");
+          var prop = sym.GetType().GetProperty("Name", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.FlattenHierarchy);
           if (prop != null) return prop.GetValue(sym)?.ToString() ?? "";
-          var field = sym.GetType().GetField("Name");
+          var field = sym.GetType().GetField("Name", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.FlattenHierarchy);
           if (field != null) return field.GetValue(sym)?.ToString() ?? "";
       } catch {}
 
@@ -701,25 +716,8 @@ namespace IPVault
 
           if (!string.IsNullOrEmpty(type))
           {
-              // Bypass blacklist for IntelliSense (pass null)
               AddProcessedNames(fullName, type, ipNames, null);
           }
-        }
-
-        // Extract parameters if it's a function
-        if (element.Kind == vsCMElement.vsCMElementFunction)
-        {
-            var func = element as CodeFunction;
-            if (func != null && func.Parameters != null)
-            {
-                foreach (CodeParameter param in func.Parameters)
-                {
-                    if (!string.IsNullOrEmpty(param.Name))
-                    {
-                        AddProcessedNames(param.Name, "Var", ipNames, null);
-                    }
-                }
-            }
         }
 
         if (element.Kind == vsCMElement.vsCMElementNamespace ||
