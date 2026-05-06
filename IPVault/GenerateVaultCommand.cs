@@ -94,29 +94,29 @@ namespace IPVault
     private DTE2 _dte;
     private AsyncPackage? _package;
 
-    private static readonly HashSet<string> _cppKeywords = new HashSet<string>(StringComparer.Ordinal) 
+    private static readonly HashSet<string> _cppKeywords = new HashSet<string>(StringComparer.Ordinal)
     {
-        "alignas", "alignof", "and", "and_eq", "asm", "atomic_cancel", "atomic_commit", "atomic_noexcept", 
-        "auto", "bitand", "bitor", "bool", "break", "case", "catch", "char", "char8_t", "char16_t", "char32_t", 
-        "class", "compl", "concept", "const", "consteval", "constexpr", "constinit", "const_cast", "continue", 
-        "co_await", "co_return", "co_yield", "decltype", "default", "delete", "do", "double", "dynamic_cast", 
-        "else", "enum", "explicit", "export", "extern", "false", "float", "for", "friend", "goto", "if", 
-        "inline", "int", "long", "mutable", "namespace", "new", "noexcept", "not", "not_eq", "nullptr", 
-        "operator", "or", "or_eq", "private", "protected", "public", "reflexpr", "register", "reinterpret_cast", 
-        "requires", "return", "short", "signed", "sizeof", "static", "static_assert", "static_cast", "struct", 
-        "switch", "synchronized", "template", "this", "thread_local", "throw", "true", "try", "typedef", 
-        "typeid", "typename", "union", "unsigned", "using", "virtual", "void", "volatile", "wchar_t", "while", 
-        "xor", "xor_eq", 
-        "std", "string", "vector", "map", "set", "list", "array", "deque", "unordered_map", "unordered_set", 
-        "shared_ptr", "unique_ptr", "weak_ptr", "allocator", "basic_string", "char_traits", "pair", "tuple", 
-        "optional", "variant", "any", "function", "function_ref", "span", "string_view", "size_t", "ptrdiff_t", 
+        "alignas", "alignof", "and", "and_eq", "asm", "atomic_cancel", "atomic_commit", "atomic_noexcept",
+        "auto", "bitand", "bitor", "bool", "break", "case", "catch", "char", "char8_t", "char16_t", "char32_t",
+        "class", "compl", "concept", "const", "consteval", "constexpr", "constinit", "const_cast", "continue",
+        "co_await", "co_return", "co_yield", "decltype", "default", "delete", "do", "double", "dynamic_cast",
+        "else", "enum", "explicit", "export", "extern", "false", "float", "for", "friend", "goto", "if",
+        "inline", "int", "long", "mutable", "namespace", "new", "noexcept", "not", "not_eq", "nullptr",
+        "operator", "or", "or_eq", "private", "protected", "public", "reflexpr", "register", "reinterpret_cast",
+        "requires", "return", "short", "signed", "sizeof", "static", "static_assert", "static_cast", "struct",
+        "switch", "synchronized", "template", "this", "thread_local", "throw", "true", "try", "typedef",
+        "typeid", "typename", "union", "unsigned", "using", "virtual", "void", "volatile", "wchar_t", "while",
+        "xor", "xor_eq",
+        "std", "string", "vector", "map", "set", "list", "array", "deque", "unordered_map", "unordered_set",
+        "shared_ptr", "unique_ptr", "weak_ptr", "allocator", "basic_string", "char_traits", "pair", "tuple",
+        "optional", "variant", "any", "function", "function_ref", "span", "string_view", "size_t", "ptrdiff_t",
         "intptr_t", "uintptr_t", "int8_t", "int16_t", "int32_t", "int64_t", "uint8_t", "uint16_t", "uint32_t", "uint64_t",
-        "__cdecl", "__stdcall", "__fastcall", "__thiscall", "__vectorcall", "__ptr64", "__ptr32", "__unaligned", 
+        "__cdecl", "__stdcall", "__fastcall", "__thiscall", "__vectorcall", "__ptr64", "__ptr32", "__unaligned",
         "__sptr", "__uptr", "__declspec", "__forceinline", "__inline", "__w64", "__int8", "__int16", "__int32", "__int64",
-        "begin", "end", "cbegin", "cend", "rbegin", "rend", "crbegin", "crend", "size", "length", "empty", 
-        "clear", "insert", "erase", "push_back", "pop_back", "push_front", "pop_front", "emplace", "emplace_back", 
-        "emplace_front", "front", "back", "first", "second", "get", "make_pair", "make_tuple", "tie", "swap", 
-        "reserve", "capacity", "shrink_to_fit", "find", "count", "contains", "lower_bound", "upper_bound", 
+        "begin", "end", "cbegin", "cend", "rbegin", "rend", "crbegin", "crend", "size", "length", "empty",
+        "clear", "insert", "erase", "push_back", "pop_back", "push_front", "pop_front", "emplace", "emplace_back",
+        "emplace_front", "front", "back", "first", "second", "get", "make_pair", "make_tuple", "tie", "swap",
+        "reserve", "capacity", "shrink_to_fit", "find", "count", "contains", "lower_bound", "upper_bound",
         "equal_range", "iterator", "const_iterator", "reverse_iterator", "const_reverse_iterator",
         "value_type", "reference", "const_reference", "pointer", "const_pointer", "difference_type"
     };
@@ -132,7 +132,7 @@ namespace IPVault
       try
       {
         if (_package == null) return;
-        
+
         var options = (IPVaultOptions)_package.GetDialogPage(typeof(IPVaultOptions));
         string sourceDir = options.PdbDirectory;
 
@@ -192,7 +192,7 @@ namespace IPVault
         string solutionDir = Path.GetDirectoryName(solution.FullName) ?? Path.GetTempPath();
         string vsPath = Path.Combine(solutionDir, ".vs", "IPVault");
         Directory.CreateDirectory(vsPath);
-        
+
         string vaultFilePath = Path.Combine(vsPath, "ip_vault_map.json");
         string pdbDirPath = Path.Combine(vsPath, "PDBS");
         string whitelistPath = Path.Combine(vsPath, "WhiteList.json");
@@ -211,7 +211,7 @@ namespace IPVault
             if (project.ProjectItems != null)
                 GatherFilesFromProjectItems(project.ProjectItems, solutionFiles);
         }
-        
+
         // 2. Save to WhiteList.json
         SaveFileList(solutionFiles, whitelistPath);
         IpVaultLogger.Log($"[IPVault] Solution scan complete. Found {solutionFiles.Count} files. Whitelist updated.");
@@ -219,7 +219,7 @@ namespace IPVault
         // 3. Build Blacklist from Non-Proprietary Modules in all PDBs
         HashSet<string> blacklist = new HashSet<string>(StringComparer.Ordinal);
         string[] pdbFiles = Directory.Exists(pdbDirPath) ? Directory.GetFiles(pdbDirPath, "*.pdb") : new string[0];
-        
+
         IpVaultLogger.Log("[IPVault] Building blacklist from external PDB modules...");
         foreach (string pdbPath in pdbFiles)
         {
@@ -262,20 +262,20 @@ namespace IPVault
     private bool IsFileProprietary(string filePath, HashSet<string> whitelistSet)
     {
         if (string.IsNullOrEmpty(filePath)) return false;
-        
+
         string fullPath;
         try { fullPath = Path.GetFullPath(filePath); }
         catch { return false; }
 
         if (whitelistSet.Contains(fullPath)) return true;
 
-        if (fullPath.EndsWith(".pb.h", StringComparison.OrdinalIgnoreCase) || 
+        if (fullPath.EndsWith(".pb.h", StringComparison.OrdinalIgnoreCase) ||
             fullPath.EndsWith(".pb.cc", StringComparison.OrdinalIgnoreCase))
         {
             string fileName = Path.GetFileName(fullPath);
-            if (fileName.EndsWith(".pb.h", StringComparison.OrdinalIgnoreCase)) 
+            if (fileName.EndsWith(".pb.h", StringComparison.OrdinalIgnoreCase))
                 fileName = fileName.Substring(0, fileName.Length - 5);
-            else if (fileName.EndsWith(".pb.cc", StringComparison.OrdinalIgnoreCase)) 
+            else if (fileName.EndsWith(".pb.cc", StringComparison.OrdinalIgnoreCase))
                 fileName = fileName.Substring(0, fileName.Length - 6);
 
             string expected = "\\" + fileName + ".proto";
@@ -402,14 +402,14 @@ namespace IPVault
 
               string type = "Var";
               if (sym is ProcedureSymbol) type = "Func";
-              else if (sym is ConstantSymbol || sym is LocalSymbol || sym is DataSymbol) type = "Var"; 
-              else if (sym is UdtSymbol us) 
+              else if (sym is ConstantSymbol || sym is LocalSymbol || sym is DataSymbol) type = "Var";
+              else if (sym is UdtSymbol us)
               {
                   type = "Class";
                   ExtractMembersFromUdt(pdb, us, ipNames, blacklist);
               }
 
-              AddProcessedNames(fullName, type, ipNames, blacklist);
+              ProcessAndFilterSymbol(fullName, type, ipNames, blacklist);
             }
           }
 
@@ -425,14 +425,14 @@ namespace IPVault
 
                   string type = "Var";
                   if (sym is ProcedureSymbol) type = "Func";
-                  else if (sym is ConstantSymbol || sym is LocalSymbol || sym is DataSymbol) type = "Var"; 
-                  else if (sym is UdtSymbol us) 
+                  else if (sym is ConstantSymbol || sym is LocalSymbol || sym is DataSymbol) type = "Var";
+                  else if (sym is UdtSymbol us)
                   {
                       type = "Class";
                       ExtractMembersFromUdt(pdb, us, ipNames, blacklist);
                   }
 
-                  AddProcessedNames(fullName, type, ipNames, blacklist);
+                  ProcessAndFilterSymbol(fullName, type, ipNames, blacklist);
               }
           }
         }
@@ -449,7 +449,7 @@ namespace IPVault
         {
             var tpi = pdb.TpiStream;
             if (tpi == null) return;
-            
+
             var typeRecord = tpi[us.Type];
             TypeIndex fieldListIndex = default;
 
@@ -461,9 +461,9 @@ namespace IPVault
             {
                 fieldListIndex = er.FieldList;
             }
-            
+
             if (fieldListIndex == default) return;
-            
+
             var fieldListRecord = tpi[fieldListIndex] as FieldListRecord;
             if (fieldListRecord == null || fieldListRecord.Fields == null) return;
 
@@ -474,7 +474,7 @@ namespace IPVault
                     string fieldName = dmr.Name.ToString();
                     if (!string.IsNullOrEmpty(fieldName))
                     {
-                        AddProcessedNames(fieldName, "Var", ipNames, blacklist);
+                        ProcessAndFilterSymbol(fieldName, "Var", ipNames, blacklist);
                     }
                 }
                 else if (field is EnumeratorRecord enr)
@@ -482,15 +482,15 @@ namespace IPVault
                     string enumName = enr.Name.ToString();
                     if (!string.IsNullOrEmpty(enumName))
                     {
-                        AddProcessedNames(enumName, "Enum", ipNames, blacklist);
+                        ProcessAndFilterSymbol(enumName, "Enum", ipNames, blacklist);
                     }
                 }
-                else 
+                else
                 {
                     string name = GetNameFromSymbol(field);
                     if (!string.IsNullOrEmpty(name))
                     {
-                        AddProcessedNames(name, "Var", ipNames, blacklist);
+                        ProcessAndFilterSymbol(name, "Var", ipNames, blacklist);
                     }
                 }
             }
@@ -498,27 +498,99 @@ namespace IPVault
         catch {}
     }
 
+    private bool IsThirdPartyNamespace(string name)
+    {
+        string clean = name.Replace("const ", "").Replace("struct ", "").Replace("class ", "").Replace("enum ", "").Trim();
+        int spaceIdx = clean.IndexOf(' ');
+        if (spaceIdx > 0 && spaceIdx < clean.IndexOf("::")) 
+        {
+            clean = clean.Substring(spaceIdx + 1).Trim();
+        }
+
+        return clean.StartsWith("std::") || 
+               clean.StartsWith("__gnu_cxx::") || 
+               clean.StartsWith("google::protobuf::") || 
+               clean.StartsWith("boost::") || 
+               clean.StartsWith("testing::") || 
+               clean.StartsWith("benchmark::") || 
+               clean.StartsWith("web::") || 
+               clean.StartsWith("utility::") || 
+               clean.StartsWith("concurrency::") || 
+               clean.StartsWith("pplx::") || 
+               clean.StartsWith("nlohmann::");
+    }
+
+    private void ProcessAndFilterSymbol(string fullName, string defaultType, Dictionary<string, string> ipNames, HashSet<string>? blacklist)
+    {
+        if (string.IsNullOrEmpty(fullName)) return;
+
+        if (IsThirdPartyNamespace(fullName))
+        {
+            // Discard the third-party shell, but extract and process its template arguments
+            int start = fullName.IndexOf('<');
+            if (start != -1)
+            {
+                int end = fullName.LastIndexOf('>');
+                if (end > start)
+                {
+                    string inner = fullName.Substring(start + 1, end - start - 1);
+                    var args = SplitTemplateArgs(inner);
+                    foreach (var arg in args)
+                    {
+                        ProcessAndFilterSymbol(arg.Trim(), defaultType, ipNames, blacklist);
+                    }
+                }
+            }
+            return;
+        }
+
+        // Normal proprietary symbol
+        AddProcessedNames(fullName, defaultType, ipNames, blacklist);
+    }
+
+    private List<string> SplitTemplateArgs(string inner)
+    {
+        var list = new List<string>();
+        int depth = 0;
+        int lastStart = 0;
+        for (int i = 0; i < inner.Length; i++)
+        {
+            if (inner[i] == '<') depth++;
+            else if (inner[i] == '>') depth--;
+            else if (inner[i] == ',' && depth == 0)
+            {
+                list.Add(inner.Substring(lastStart, i - lastStart));
+                lastStart = i + 1;
+            }
+        }
+        if (lastStart < inner.Length)
+        {
+            list.Add(inner.Substring(lastStart));
+        }
+        return list;
+    }
+
     private void AddProcessedNames(string fullName, string defaultType, Dictionary<string, string> ipNames, HashSet<string>? blacklist)
     {
         char[] separators = new char[] { '?', ':', '.', '_', '<', '>', ',', ' ', '&', '*', '(', ')', '[', ']', '-', '+', '=', '~', '`', '\'', '\"', '\\', '/', '$', '@', '!' };
         string[] parts = fullName.Split(separators, StringSplitOptions.RemoveEmptyEntries);
-        
+
         foreach (string part in parts)
         {
             if (string.IsNullOrEmpty(part)) continue;
-            
+
             // Filter MSVC mangling artifacts and pure numbers (valid identifiers don't start with digits)
             if (char.IsDigit(part[0])) continue;
-            
+
             // Apply blacklist if provided
             if (blacklist != null && blacklist.Contains(part)) continue;
-            
+
             if (_cppKeywords.Contains(part)) continue;
 
             if (!ipNames.ContainsKey(part))
             {
                 string type = defaultType;
-                if (parts.Length > 1 && part != parts.Last()) type = "Class"; 
+                if (parts.Length > 1 && part != parts.Last()) type = "Class";
                 ipNames[part] = type;
             }
         }
@@ -535,7 +607,7 @@ namespace IPVault
       if (sym is LocalSymbol ls) return ls.Name.ToString();
       if (sym is EnumeratorRecord er) return er.Name.ToString();
       if (sym is DataMemberRecord dmr) return dmr.Name.ToString();
-      
+
       try
       {
           var prop = sym.GetType().GetProperty("Name");
@@ -634,8 +706,24 @@ namespace IPVault
           }
         }
 
-        if (element.Kind == vsCMElement.vsCMElementNamespace || 
-            element.Kind == vsCMElement.vsCMElementClass || 
+        // Extract parameters if it's a function
+        if (element.Kind == vsCMElement.vsCMElementFunction)
+        {
+            var func = element as CodeFunction;
+            if (func != null && func.Parameters != null)
+            {
+                foreach (CodeParameter param in func.Parameters)
+                {
+                    if (!string.IsNullOrEmpty(param.Name))
+                    {
+                        AddProcessedNames(param.Name, "Var", ipNames, null);
+                    }
+                }
+            }
+        }
+
+        if (element.Kind == vsCMElement.vsCMElementNamespace ||
+            element.Kind == vsCMElement.vsCMElementClass ||
             element.Kind == vsCMElement.vsCMElementStruct ||
             element.Kind == vsCMElement.vsCMElementEnum)
         {
@@ -651,10 +739,10 @@ namespace IPVault
     private Dictionary<string, string> GenerateTokenMap(Dictionary<string, string> names)
     {
       var map = new Dictionary<string, string>(StringComparer.Ordinal);
-      var counters = new Dictionary<string, int> { 
-          {"Class", 1}, {"Var", 1}, {"Func", 1}, {"Enum", 1}, {"Macro", 1}, {"File", 1}, {"Property", 1}, {"Typedef", 1} 
+      var counters = new Dictionary<string, int> {
+          {"Class", 1}, {"Var", 1}, {"Func", 1}, {"Enum", 1}, {"Macro", 1}, {"File", 1}, {"Property", 1}, {"Typedef", 1}
       };
-      
+
       var sortedNames = names.Keys.OrderBy(n => n).ToList();
       foreach (var name in sortedNames)
       {
