@@ -38,7 +38,6 @@ namespace IPVault
 
     public static async Task InitializeAsync(AsyncPackage package)
     {
-      await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(package.DisposalToken);
       OleMenuCommandService? commandService = await package.GetServiceAsync(typeof(IMenuCommandService)) as OleMenuCommandService;
       if (commandService == null)
       {
@@ -93,6 +92,7 @@ namespace IPVault
   {
     private DTE2 _dte;
     private AsyncPackage? _package;
+    private HashSet<string> _thirdPartyChainTerms = new HashSet<string>(StringComparer.Ordinal);
 
     private static readonly HashSet<string> _cppKeywords = new HashSet<string>(StringComparer.Ordinal)
     {
@@ -118,9 +118,14 @@ namespace IPVault
         "emplace_front", "front", "back", "first", "second", "get", "make_pair", "make_tuple", "tie", "swap",
         "reserve", "capacity", "shrink_to_fit", "find", "count", "contains", "lower_bound", "upper_bound",
         "equal_range", "iterator", "const_iterator", "reverse_iterator", "const_reverse_iterator",
-        "value_type", "reference", "const_reference", "pointer", "const_pointer", "difference_type"
+        "value_type", "reference", "const_reference", "pointer", "const_pointer", "difference_type",
+        "filesystem", "chrono", "thread", "mutex", "atomic", "regex", "copy", "move", "transform", "sort",
+        "find_if", "remove", "remove_if", "replace", "cin", "cout", "cerr", "endl", "make_shared", "make_unique",
+        "async", "future", "promise", "lock_guard", "unique_lock",
+        "Class", "Var", "Func", "Enum", "Macro", "File", "Property", "Typedef",
+        "google", "protobuf", "boost", "testing", "benchmark", "web", "utility", "concurrency", "pplx", "nlohmann", "json", "http",
+        "TEST", "TEST_F", "TEST_P", "TYPED_TEST", "TYPED_TEST_P", "EXPECT_EQ", "ASSERT_EQ", "EXPECT_TRUE", "ASSERT_TRUE", "EXPECT_FALSE", "ASSERT_FALSE"
     };
-
     public VaultExtractor(DTE2 dte, AsyncPackage? package = null)
     {
       _dte = dte;
@@ -131,10 +136,19 @@ namespace IPVault
     {
       try
       {
-        if (_package == null) return;
+        string sourceDir = "";
 
-        var options = (IPVaultOptions)_package.GetDialogPage(typeof(IPVaultOptions));
-        string sourceDir = options.PdbDirectory;
+        if (_package != null)
+        {
+            var options = (IPVaultOptions)_package.GetDialogPage(typeof(IPVaultOptions));
+            sourceDir = options?.PdbDirectory ?? "";
+        }
+
+        // Fallback to Environment Variable
+        if (string.IsNullOrWhiteSpace(sourceDir))
+        {
+            sourceDir = Environment.GetEnvironmentVariable("IPVAULT_EXTERNAL_PDB_DIR") ?? "";
+        }
 
         if (string.IsNullOrWhiteSpace(sourceDir) || !Directory.Exists(sourceDir))
         {
@@ -241,6 +255,46 @@ namespace IPVault
         {
             if (project.ProjectItems != null)
                 ExtractFromIntelliSense(project.ProjectItems, solutionFiles, ipNameWithTypes);
+        }
+
+        // 5.5 Extract File and Folder Names
+        IpVaultLogger.Log("[IPVault] Extracting file and folder names...");
+        foreach (string file in solutionFiles)
+        {
+            try
+            {
+                string[] pathParts = file.Split(new char[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries);
+                foreach (string part in pathParts)
+                {
+                    string cleanPart = Path.GetFileNameWithoutExtension(part);
+                    // Avoid adding drive letters or very short directory names
+                    if (cleanPart.Length > 3 && !cleanPart.EndsWith(":") && !ipNameWithTypes.ContainsKey(cleanPart))
+                    {
+                        ipNameWithTypes[cleanPart] = "File";
+                    }
+                }
+            }
+            catch { }
+        }
+
+        // 6. Consolidation & Tokenization
+        IpVaultLogger.Log("[IPVault] Extracting file and folder names...");
+        foreach (string file in solutionFiles)
+        {
+            try
+            {
+                string[] pathParts = file.Split(new char[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries);
+                foreach (string part in pathParts)
+                {
+                    string cleanPart = Path.GetFileNameWithoutExtension(part);
+                    // Avoid adding drive letters or very short directory names
+                    if (cleanPart.Length > 3 && !cleanPart.EndsWith(":") && !ipNameWithTypes.ContainsKey(cleanPart))
+                    {
+                        ipNameWithTypes[cleanPart] = "File";
+                    }
+                }
+            }
+            catch { }
         }
 
         // 6. Consolidation & Tokenization
@@ -502,21 +556,21 @@ namespace IPVault
     {
         string clean = name.Replace("const ", "").Replace("struct ", "").Replace("class ", "").Replace("enum ", "").Trim();
         int spaceIdx = clean.IndexOf(' ');
-        if (spaceIdx > 0 && spaceIdx < clean.IndexOf("::")) 
+        if (spaceIdx > 0 && spaceIdx < clean.IndexOf("::"))
         {
             clean = clean.Substring(spaceIdx + 1).Trim();
         }
 
-        return clean.StartsWith("std::") || 
-               clean.StartsWith("__gnu_cxx::") || 
-               clean.StartsWith("google::protobuf::") || 
-               clean.StartsWith("boost::") || 
-               clean.StartsWith("testing::") || 
-               clean.StartsWith("benchmark::") || 
-               clean.StartsWith("web::") || 
-               clean.StartsWith("utility::") || 
-               clean.StartsWith("concurrency::") || 
-               clean.StartsWith("pplx::") || 
+        return clean.StartsWith("std::") ||
+               clean.StartsWith("__gnu_cxx::") ||
+               clean.StartsWith("google::protobuf::") ||
+               clean.StartsWith("boost::") ||
+               clean.StartsWith("testing::") ||
+               clean.StartsWith("benchmark::") ||
+               clean.StartsWith("web::") ||
+               clean.StartsWith("utility::") ||
+               clean.StartsWith("concurrency::") ||
+               clean.StartsWith("pplx::") ||
                clean.StartsWith("nlohmann::");
     }
 
@@ -526,8 +580,25 @@ namespace IPVault
 
         if (IsThirdPartyNamespace(fullName))
         {
-            // Discard the third-party shell, but extract and process its template arguments
+            // Extract the third-party namespace chain terms so we never tokenize them anywhere
             int start = fullName.IndexOf('<');
+            string chain = start != -1 ? fullName.Substring(0, start) : fullName;
+
+            // For a function, remove the argument list as well
+            int parenStart = chain.IndexOf('(');
+            if (parenStart != -1) chain = chain.Substring(0, parenStart);
+
+            string[] chainParts = chain.Split(new[] { "::", "." }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (string cp in chainParts)
+            {
+                string cleanCp = cp.Trim('?', '&', '*'); // MSVC and pointer artifacts
+                if (!string.IsNullOrEmpty(cleanCp) && !char.IsDigit(cleanCp[0]))
+                {
+                    _thirdPartyChainTerms.Add(cleanCp);
+                }
+            }
+
+            // Discard the third-party shell, but extract and process its template arguments
             if (start != -1)
             {
                 int end = fullName.LastIndexOf('>');
@@ -599,7 +670,7 @@ namespace IPVault
     private string GetNameFromSymbol(object sym)
     {
       if (sym == null) return "";
-      
+
       // SymbolRecords
       if (sym is ProcedureSymbol rs) return rs.Name.ToString();
       if (sym is Public32Symbol ps) return ps.Name.ToString();
@@ -745,6 +816,8 @@ namespace IPVault
       foreach (var name in sortedNames)
       {
         if (name == "main") continue;
+        if (_thirdPartyChainTerms.Contains(name)) continue;
+
         string type = names[name];
         map[name] = $"{type}_{counters[type]++}";
       }

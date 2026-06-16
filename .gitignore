@@ -4,6 +4,8 @@
 ## Get latest from https://github.com/github/gitignore/blob/master/VisualStudio.gitignore
 
 # User-specific files
+IPVault/Resources/CLI/mcp.exe
+IPVault/Resources/CLI/gemini.exe
 *.rsuser
 *.suo
 *.user

@@ -39,7 +39,7 @@ namespace IPVault
         private void Execute(object sender, EventArgs e)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
-            
+
             _ = this.package.JoinableTaskFactory.RunAsync(async () =>
             {
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();

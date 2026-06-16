@@ -8,17 +8,16 @@ using EnvDTE;
 using EnvDTE80;
 using System.IO;
 using Task = System.Threading.Tasks.Task;
-using System.Windows;
 
 namespace IPVault
 {
-    internal sealed class RunGeminiCommand
+    internal sealed class TestMcpCommand
     {
-        public const int CommandId = 0x0101;
+        public const int CommandId = 0x0103;
         public static readonly Guid CommandSet = new Guid("45101b51-12e9-48b7-8bc7-7c02d439b422");
         private readonly AsyncPackage package;
 
-        private RunGeminiCommand(AsyncPackage package, OleMenuCommandService commandService)
+        private TestMcpCommand(AsyncPackage package, OleMenuCommandService commandService)
         {
             this.package = package ?? throw new ArgumentNullException(nameof(package));
             commandService = commandService ?? throw new ArgumentNullException(nameof(commandService));
@@ -28,14 +27,14 @@ namespace IPVault
             commandService.AddCommand(menuItem);
         }
 
-        public static RunGeminiCommand? Instance { get; private set; }
+        public static TestMcpCommand? Instance { get; private set; }
 
         public static async Task InitializeAsync(AsyncPackage package)
         {
             OleMenuCommandService? commandService = await package.GetServiceAsync(typeof(IMenuCommandService)) as OleMenuCommandService;
             if (commandService != null)
             {
-                Instance = new RunGeminiCommand(package, commandService);
+                Instance = new TestMcpCommand(package, commandService);
             }
         }
 
@@ -91,23 +90,25 @@ namespace IPVault
                         return;
                     }
 
-                    string mcpConfig = $"  \"mcpServers\": {{\n    \"ipvault\": {{\n      \"command\": \"{mcpPath.Replace("\\", "\\\\")}\",\n      \"args\": [\"{mapPath.Replace("\\", "\\\\")}\", \"{solutionDir.Replace("\\", "\\\\")}\"]\n    }}\n  }}";
+                    string mcpCmd = $"\"{mcpPath}\" \"{mapPath}\" \"{solutionDir}\" --interactive";
 
-                    Clipboard.SetText(mcpConfig);
+                    try
+                    {
+                        // Launch in a standard external CMD window in the solution root
+                        System.Diagnostics.ProcessStartInfo psi = new System.Diagnostics.ProcessStartInfo("cmd.exe")
+                        {
+                            Arguments = $"/k \"echo Starting interactive MCP Test... & {mcpCmd}\"",
+                            UseShellExecute = true,
+                            WorkingDirectory = solutionDir
+                        };
+                        System.Diagnostics.Process.Start(psi);
 
-                    string msg = "IP Vault MCP Server configuration has been copied to your clipboard!\n\n" +
-                                 "You can paste this into your Claude Desktop, Roo Code, or Cline MCP settings file.\n\n" +
-                                 "Config:\n" + mcpConfig;
-
-                    VsShellUtilities.ShowMessageBox(
-                        this.package,
-                        msg,
-                        "IP Vault MCP Server",
-                        OLEMSGICON.OLEMSGICON_INFO,
-                        OLEMSGBUTTON.OLEMSGBUTTON_OK,
-                        OLEMSGDEFBUTTON.OLEMSGDEFBUTTON_FIRST);
-
-                    IpVaultLogger.Log($"[IPVault] MCP Config generated and copied to clipboard.");
+                        IpVaultLogger.Log($"[IPVault] MCP interactive mode launched in external CMD window.");
+                    }
+                    catch (Exception ex)
+                    {
+                        IpVaultLogger.Log($"[IPVault] Error launching MCP Test: {ex.Message}");
+                    }
                 }
                 catch (Exception ex)
                 {

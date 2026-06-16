@@ -52,13 +52,15 @@
     </None>
   </ItemGroup>
   <ItemGroup>
-    <Content Remove="..\x64\Release\EdgeProxyServer.exe" />
-  </ItemGroup>
-  <ItemGroup>
-    <Content Include="..\x64\$(Configuration)\EdgeProxyServer.exe">
-      <Link>EdgeProxyServer.exe</Link>
+    <Content Include="Resources\CLI\mcp.exe">
       <IncludeInVSIX>true</IncludeInVSIX>
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
   </ItemGroup>
+
+  <!-- Automatically build and publish the MCP server before the VSIX is packed -->
+  <Target Name="BuildMcpServer" BeforeTargets="PrepareForBuild">
+    <Message Text="[IPVault] Building and Publishing MCP Server..." Importance="high" />
+    <Exec Command="dotnet publish &quot;$(ProjectDir)..\IPVault.Mcp\IPVault.Mcp.csproj&quot; -c $(Configuration) -r win-x64 --self-contained -p:PublishSingleFile=true -p:AssemblyName=mcp -o &quot;$(ProjectDir)Resources\CLI\&quot;" />
+  </Target>
 </Project>
