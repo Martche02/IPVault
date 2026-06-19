@@ -501,18 +501,6 @@ async def handle_message(message_json):
                         }
                     },
                     {
-                        "name": "mcp_write_file",
-                        "description": "Unfilters provided content and writes it to file." + rule_reminder,
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "path": {"type": "string"},
-                                "content": {"type": "string"}
-                            },
-                            "required": ["path", "content"]
-                        }
-                    },
-                    {
                         "name": "mcp_exec_command",
                         "description": "Executes command with unfiltering/filtering logic." + rule_reminder,
                         "inputSchema": {
@@ -556,17 +544,7 @@ async def handle_message(message_json):
                 content = filter_text(raw_text)
                 content = await intercept_with_editor("mcp_read_file", content)
             elif tool_name == "mcp_write_file":
-                path = arguments.get("path", "")
-                if not os.path.isabs(path):
-                    path = os.path.abspath(os.path.join(_solutionDir, path))
-                text_content = arguments.get("content", "")
-                unfiltered = unfilter_text(text_content)
-
-                with open(path, "w", encoding="utf-8") as f:
-                    f.write(unfiltered)
-
-                content = f"Successfully wrote to {path}"
-                content = await intercept_with_editor("mcp_write_file", content)
+                raise Exception("mcp_write_file tool is disabled (reserved for future release)")
             elif tool_name == "mcp_exec_command":
                 command = arguments.get("command", "")
                 cwd = arguments.get("cwd", _solutionDir)
@@ -624,16 +602,11 @@ async def handle_message(message_json):
 
 async def run_interactive_mode():
     print("=== IPVault MCP Interactive Test Mode (Python) ===")
-    print("This mode allows you to manually trigger MCP tools and see the editor interception in action.")
-    print("\nAvailable commands:")
-    print("  read <path>")
-    print("  write <path> <content_text...>")
-    print("  exec <command...>")
-    print("  show <content_text...>")
-    print("  exit\n")
+    print("This mode allows you to manually trigger MCP tools and see the editor interception in action.\n")
 
     loop = asyncio.get_event_loop()
     while True:
+        print("Available commands: read <path> | exec <command...> | show <content_text...> | exit")
         sys.stdout.write("mcp> ")
         sys.stdout.flush()
         line = await loop.run_in_executor(None, sys.stdin.readline)
@@ -641,6 +614,10 @@ async def run_interactive_mode():
             break
         line = line.strip()
         if not line:
+            continue
+
+        # Silently ignore automatic shell/venv activation scripts sent by VS Code/terminal integrations
+        if "activate" in line.lower():
             continue
 
         parts = line.split(' ', 1)
@@ -659,17 +636,8 @@ async def run_interactive_mode():
                 result = filter_text(raw_text)
                 result = await intercept_with_editor("mcp_read_file", result)
             elif cmd == "write":
-                write_parts = arg.split(' ', 1)
-                if len(write_parts) < 2:
-                    print("Usage: write <path> <content...>")
-                    continue
-                target_path = os.path.abspath(os.path.join(_solutionDir, write_parts[0]))
-                text_content = write_parts[1]
-                unfiltered = unfilter_text(text_content)
-                with open(target_path, "w", encoding="utf-8") as f:
-                    f.write(unfiltered)
-                result = f"Successfully wrote to {target_path}"
-                result = await intercept_with_editor("mcp_write_file", result)
+                print("Error: write command is disabled (reserved for future release).")
+                continue
             elif cmd == "exec":
                 unfiltered_command = unfilter_text(arg)
                 proc = await asyncio.create_subprocess_shell(
