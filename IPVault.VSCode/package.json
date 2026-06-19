@@ -1,0 +1,46 @@
+{
+  "name": "ipvault-vscode",
+  "displayName": "IPVault VS Code",
+  "description": "Zero-Trust IP protection proxy for VS Code workspaces",
+  "version": "2.0.0",
+  "publisher": "Martche02",
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Security",
+    "Programming Languages"
+  ],
+  "activationEvents": [],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "ipvault.generate",
+        "title": "IP Vault: Generate IP Vault"
+      },
+      {
+        "command": "ipvault.getConfig",
+        "title": "IP Vault: Get MCP Server Config"
+      },
+      {
+        "command": "ipvault.testInteractive",
+        "title": "IP Vault: Test MCP Server (Interactive)"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "ipvault.generate",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "lint": "eslint ."
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.74.0"
+  }
+}
