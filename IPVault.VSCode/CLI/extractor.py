@@ -271,6 +271,26 @@ def extract_batch_symbols(filepath):
     except Exception as e:
         print(f"Error parsing Batch file {filepath}: {e}", file=sys.stderr)
 
+def load_requirements_txt(workspace_dir):
+    req_path = os.path.join(workspace_dir, "requirements.txt")
+    libs = set()
+    if os.path.exists(req_path):
+        try:
+            with open(req_path, "r", encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith('#') or line.startswith('-'):
+                        continue
+                    # Match package name (letters, numbers, underscores, hyphens)
+                    match = re.match(r'^([a-zA-Z0-9_\-]+)', line)
+                    if match:
+                        lib_name = match.group(1).replace('-', '_').lower()
+                        libs.add(lib_name)
+            print(f"Loaded {len(libs)} unprotected library names from requirements.txt")
+        except Exception as e:
+            print(f"Warning: Failed to read requirements.txt: {e}", file=sys.stderr)
+    return libs
+
 def main():
     if len(sys.argv) < 2:
         workspace_dir = os.getcwd()
@@ -280,6 +300,12 @@ def main():
     if not os.path.isdir(workspace_dir):
         print(f"Error: Workspace directory '{workspace_dir}' does not exist.", file=sys.stderr)
         sys.exit(1)
+
+    # Load dynamic unprotected libraries from requirements.txt
+    req_libs = load_requirements_txt(workspace_dir)
+    if req_libs:
+        STANDARD_LIBS.update(req_libs)
+        BASE_BLACKLIST.update(req_libs)
 
     print(f"Scanning workspace: {workspace_dir}")
     

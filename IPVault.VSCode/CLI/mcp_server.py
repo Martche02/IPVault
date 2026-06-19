@@ -715,6 +715,26 @@ async def run_mcp_server():
             sys.stdout.write(json.dumps(response) + "\n")
             sys.stdout.flush()
 
+def load_requirements_txt(solution_dir):
+    req_path = os.path.join(solution_dir, "requirements.txt")
+    libs = set()
+    if os.path.exists(req_path):
+        try:
+            with open(req_path, "r", encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith('#') or line.startswith('-'):
+                        continue
+                    # Match package name (letters, numbers, underscores, hyphens)
+                    match = re.match(r'^([a-zA-Z0-9_\-]+)', line)
+                    if match:
+                        lib_name = match.group(1).replace('-', '_').lower()
+                        libs.add(lib_name)
+            print(f"[IPVault.Mcp] Loaded {len(libs)} unprotected library names from requirements.txt", file=sys.stderr)
+        except Exception as e:
+            print(f"[IPVault.Mcp] Warning: Failed to read requirements.txt: {e}", file=sys.stderr)
+    return libs
+
 async def main():
     global _solutionDir
     if len(sys.argv) < 2:
@@ -725,6 +745,12 @@ async def main():
     _solutionDir = os.path.abspath(sys.argv[2])
 
     load_map(map_path)
+
+    # Load dynamic unprotected libraries from requirements.txt
+    req_libs = load_requirements_txt(_solutionDir)
+    if req_libs:
+        UNPROTECTED_ROOTS.update(req_libs)
+        BASE_BLACKLIST.update(req_libs)
 
     is_interactive = len(sys.argv) > 3 and sys.argv[3] == "--interactive"
 
