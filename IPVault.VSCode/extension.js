@@ -235,14 +235,12 @@ function activate(context) {
                     }
                 });
             } else {
-                vscode.env.clipboard.writeText(translated).then(() => {
-                    vscode.workspace.openTextDocument({
-                        content: translated,
-                        language: "markdown"
-                    }).then(doc => {
-                        vscode.window.showTextDocument(doc);
-                        vscode.window.showInformationMessage("Translated prompt copied to clipboard!");
-                    });
+                vscode.workspace.openTextDocument({
+                    content: translated,
+                    language: "markdown"
+                }).then(doc => {
+                    vscode.window.showTextDocument(doc);
+                    vscode.window.showInformationMessage("Translated prompt opened in new editor tab!");
                 });
             }
         }
@@ -254,22 +252,15 @@ function activate(context) {
             const translated = translateText(selectedText);
             showResult(translated, editor);
         } else {
-            // Read from clipboard, or prompt if clipboard is empty
-            vscode.env.clipboard.readText().then(clipText => {
-                if (clipText && clipText.trim()) {
-                    const translated = translateText(clipText);
+            // Prompt user if no selection
+            vscode.window.showInputBox({
+                prompt: "Paste your prompt containing real (unprotected) names to translate",
+                placeHolder: "e.g., Write a function in MyClass using MySubClass...",
+                ignoreFocusOut: true
+            }).then(input => {
+                if (input) {
+                    const translated = translateText(input);
                     showResult(translated);
-                } else {
-                    vscode.window.showInputBox({
-                        prompt: "Paste your prompt containing real (unprotected) names to translate",
-                        placeHolder: "e.g., Write a function in MyClass using MySubClass...",
-                        ignoreFocusOut: true
-                    }).then(input => {
-                        if (input) {
-                            const translated = translateText(input);
-                            showResult(translated);
-                        }
-                    });
                 }
             });
         }
@@ -315,16 +306,14 @@ function activate(context) {
                     }
                 });
             } else {
-                vscode.env.clipboard.writeText(unmasked).then(() => {
-                    // Open a temporary untitled document with the unmasked text (allowing user to save it)
-                    const ext = vscode.window.activeTextEditor ? path.extname(vscode.window.activeTextEditor.document.fileName) : '';
-                    vscode.workspace.openTextDocument({
-                        content: unmasked,
-                        language: ext === '.py' ? 'python' : (ext === '.sql' ? 'sql' : 'text')
-                    }).then(doc => {
-                        vscode.window.showTextDocument(doc);
-                        vscode.window.showInformationMessage("Unmasked content opened in new editor and copied to clipboard!");
-                    });
+                // Open a temporary untitled document with the unmasked text (allowing user to save it)
+                const ext = vscode.window.activeTextEditor ? path.extname(vscode.window.activeTextEditor.document.fileName) : '';
+                vscode.workspace.openTextDocument({
+                    content: unmasked,
+                    language: ext === '.py' ? 'python' : (ext === '.sql' ? 'sql' : 'text')
+                }).then(doc => {
+                    vscode.window.showTextDocument(doc);
+                    vscode.window.showInformationMessage("Unmasked content opened in new editor tab!");
                 });
             }
         }
@@ -336,22 +325,15 @@ function activate(context) {
             const unmasked = translateTextBack(selectedText);
             showResult(unmasked, editor);
         } else {
-            // Read from clipboard, or prompt if clipboard is empty
-            vscode.env.clipboard.readText().then(clipText => {
-                if (clipText && clipText.trim()) {
-                    const unmasked = translateTextBack(clipText);
+            // Prompt user if no selection
+            vscode.window.showInputBox({
+                prompt: "Paste your anonymized code containing Class_X/Var_Y names to unmask",
+                placeHolder: "e.g., def Func_1(self): ...",
+                ignoreFocusOut: true
+            }).then(input => {
+                if (input) {
+                    const unmasked = translateTextBack(input);
                     showResult(unmasked);
-                } else {
-                    vscode.window.showInputBox({
-                        prompt: "Paste your anonymized code containing Class_X/Var_Y names to unmask",
-                        placeHolder: "e.g., def Func_1(self): ...",
-                        ignoreFocusOut: true
-                    }).then(input => {
-                        if (input) {
-                            const unmasked = translateTextBack(input);
-                            showResult(unmasked);
-                        }
-                    });
                 }
             });
         }
