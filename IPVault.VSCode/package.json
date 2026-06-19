@@ -34,6 +34,11 @@
         "command": "ipvault.showMenu",
         "title": "IP Vault: Show Options Menu",
         "icon": "$(shield)"
+      },
+      {
+        "command": "ipvault.translatePrompt",
+        "title": "IP Vault: Translate Prompt to Masked",
+        "icon": "$(edit)"
       }
     ],
     "viewsContainers": {

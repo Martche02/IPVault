@@ -180,6 +180,11 @@ function activate(context) {
                 label: "$(terminal) Test MCP Interactive",
                 description: "Start interactive masking terminal console",
                 commandId: 'ipvault.testInteractive'
+            },
+            {
+                label: "$(edit) Translate Prompt to Masked",
+                description: "Replace unprotected names in selection or clipboard with masked ones",
+                commandId: 'ipvault.translatePrompt'
             }
         ], {
             placeHolder: "Select an IPVault action to execute"
@@ -188,6 +193,71 @@ function activate(context) {
                 vscode.commands.executeCommand(selected.commandId);
             }
         });
+    });
+
+    // Command: Translate Prompt to Masked
+    let translatePromptDisposable = vscode.commands.registerCommand('ipvault.translatePrompt', () => {
+        const workspacePath = getWorkspaceFolder();
+        if (!workspacePath) return;
+
+        const mapPath = path.join(workspacePath, '.vscode', 'filter.json');
+        if (!fs.existsSync(mapPath)) {
+            vscode.window.showWarningMessage("IP Vault map not found. Please run 'IP Vault: Generate IP Vault' first.");
+            return;
+        }
+
+        // Helper to perform the translation
+        function translateText(text) {
+            const mapData = JSON.parse(fs.readFileSync(mapPath, 'utf8'));
+            const keys = Object.keys(mapData).sort((a, b) => b.length - a.length);
+            let filteredText = text;
+            for (const original of keys) {
+                const masked = mapData[original];
+                const escapedOriginal = original.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+                const regex = new RegExp('\\b' + escapedOriginal + '\\b', 'g');
+                filteredText = filteredText.replace(regex, masked);
+            }
+            return filteredText;
+        }
+
+        function showResult(translated) {
+            vscode.env.clipboard.writeText(translated).then(() => {
+                vscode.workspace.openTextDocument({
+                    content: translated,
+                    language: "markdown"
+                }).then(doc => {
+                    vscode.window.showTextDocument(doc);
+                    vscode.window.showInformationMessage("Translated prompt copied to clipboard!");
+                });
+            });
+        }
+
+        // Try reading selection first
+        const editor = vscode.window.activeTextEditor;
+        if (editor && !editor.selection.isEmpty) {
+            const selectedText = editor.document.getText(editor.selection);
+            const translated = translateText(selectedText);
+            showResult(translated);
+        } else {
+            // Read from clipboard, or prompt if clipboard is empty
+            vscode.env.clipboard.readText().then(clipText => {
+                if (clipText && clipText.trim()) {
+                    const translated = translateText(clipText);
+                    showResult(translated);
+                } else {
+                    vscode.window.showInputBox({
+                        prompt: "Paste your prompt containing real (unprotected) names to translate",
+                        placeHolder: "e.g., Write a function in MyClass using MySubClass...",
+                        ignoreFocusOut: true
+                    }).then(input => {
+                        if (input) {
+                            const translated = translateText(input);
+                            showResult(translated);
+                        }
+                    });
+                }
+            });
+        }
     });
 
     // Register sidebar tree view
@@ -206,6 +276,7 @@ function activate(context) {
         getConfigDisposable, 
         testInteractiveDisposable,
         showMenuDisposable,
+        translatePromptDisposable,
         statusBarItem,
         treeView
     );
@@ -248,6 +319,16 @@ class IPVaultTreeDataProvider {
                         title: 'Test MCP Interactive'
                     },
                     new vscode.ThemeIcon('terminal')
+                ),
+                new IPVaultTreeItem(
+                    "Translate Prompt",
+                    "Replace unprotected names in a prompt with masked ones",
+                    vscode.TreeItemCollapsibleState.None,
+                    {
+                        command: 'ipvault.translatePrompt',
+                        title: 'Translate Prompt'
+                    },
+                    new vscode.ThemeIcon('edit')
                 )
             ];
         }
