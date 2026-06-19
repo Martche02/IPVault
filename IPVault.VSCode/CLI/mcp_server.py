@@ -99,31 +99,27 @@ def filter_text(text):
     
     # 0. Detect and dynamically register attributes accessed on protected names (recursively)
     if _forwardMap:
-        while True:
-            # Build alternation of all currently known protected keys
-            keys_escaped = '|'.join(re.escape(k) for k in _forwardMap.keys() if is_valid_identifier(k))
-            if not keys_escaped:
-                break
-                
-            # Match: protected_key.attribute
-            attr_regex = re.compile(r'\b(' + keys_escaped + r')\.([a-zA-Z_][a-zA-Z0-9_]*)\b')
-            new_regs = {}
-            for match in attr_regex.finditer(text):
-                attr = match.group(2)
-                if is_valid_identifier(attr) and attr not in _forwardMap and attr not in new_regs:
-                    if attr not in COMMON_ATTRIBUTES and attr.lower() not in COMMON_ATTRIBUTES:
-                        token = f"Var_{_dynamicVarCounter}"
-                        _dynamicVarCounter += 1
-                        new_regs[attr] = token
-            
-            if not new_regs:
-                break
-                
-            # Apply new registrations to map and repeat the scan for nested levels
-            for attr, token in new_regs.items():
-                _forwardMap[attr] = token
-                _reverseMap[token] = attr
-                print(f"[IPVault.Mcp] Dynamically registered nested attribute '{attr}' -> '{token}'", file=sys.stderr)
+        # Match dot-separated identifier chains: identifier.attr1.attr2...
+        chain_regex = re.compile(r'\b[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)+\b')
+        new_regs = {}
+        for match in chain_regex.finditer(text):
+            chain = match.group(0)
+            parts = chain.split('.')
+            for i in range(len(parts) - 1):
+                receiver = parts[i]
+                if receiver in _forwardMap or receiver in new_regs:
+                    attr = parts[i+1]
+                    if is_valid_identifier(attr) and attr not in _forwardMap and attr not in new_regs:
+                        if attr not in COMMON_ATTRIBUTES and attr.lower() not in COMMON_ATTRIBUTES:
+                            token = f"Var_{_dynamicVarCounter}"
+                            _dynamicVarCounter += 1
+                            new_regs[attr] = token
+                            
+        # Apply all new registrations to the map
+        for attr, token in new_regs.items():
+            _forwardMap[attr] = token
+            _reverseMap[token] = attr
+            print(f"[IPVault.Mcp] Dynamically registered nested attribute '{attr}' -> '{token}'", file=sys.stderr)
 
     # 1. Apply Map replacements first (boundaries)
     # Sort keys by length descending to avoid partial matches
