@@ -145,6 +145,13 @@ class PythonSymbolExtractor(ast.NodeVisitor):
                         var_names.add(name_to_check)
         self.generic_visit(node)
 
+    def visit_Attribute(self, node):
+        # Extract attributes/methods accessed on self anywhere in the code
+        if isinstance(node.value, ast.Name) and node.value.id == "self":
+            if is_valid_identifier(node.attr):
+                var_names.add(node.attr)
+        self.generic_visit(node)
+
     def _extract_target(self, node):
         if isinstance(node, ast.Name):
             if is_valid_identifier(node.id):
@@ -152,6 +159,8 @@ class PythonSymbolExtractor(ast.NodeVisitor):
         elif isinstance(node, ast.Attribute):
             if is_valid_identifier(node.attr):
                 var_names.add(node.attr)
+            self._extract_target(node.value)
+        elif isinstance(node, ast.Subscript):
             self._extract_target(node.value)
         elif isinstance(node, (ast.Tuple, ast.List)):
             for elt in node.elts:
