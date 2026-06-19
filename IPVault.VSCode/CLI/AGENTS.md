@@ -16,7 +16,7 @@ Você deve utilizar as ferramentas específicas para interagir com este ambiente
 - **`mcp_read_file`**: Lê o conteúdo de um arquivo mascarado. Prefira usar caminhos relativos ao usar esta ferramenta.
 - **`mcp_write_file`**: Escreve ou sobrescreve arquivos no ambiente. Você envia o conteúdo com nomes mascarados e o servidor cuida de traduzir de volta antes de salvar no disco.
 - **`mcp_exec_command`**: Executa comandos no ambiente protegido (ex: chamadas ao `python`, `pytest`, `pip`). O output (stdout/stderr) é automaticamente mascarado e filtrado antes de chegar a você.
-- **`mcp_show_to_user`**: Abre o arquivo original (sem máscara) no Notepad para que o usuário humano possa ler o código real. Útil se as máscaras tornarem a lógica indecifrável para o agente ou para depurar erros complexos.
+- **`mcp_show_to_user`**: Abre o arquivo original (sem máscara) no editor (VS Code com a flag --wait, ou Notepad como fallback) para que o usuário humano possa ler o código real. Útil se as máscaras tornarem a lógica indecifrável para o agente ou para depurar erros complexos.
 
 ## 4. Execução de Scripts e Testes (Python)
 - Para rodar scripts ou testes, utilize `mcp_exec_command`.

@@ -14,8 +14,8 @@ This is the **Python-version** optimized for **Visual Studio Code**, replacing t
 2. **Secure Proxy (`IP Vault: Get MCP Server Config`):**
    Generates a Model Context Protocol (MCP) server configuration that executes the lightweight Python MCP server (`mcp.bat`). 
 
-3. **Inline Masking & Notepad Interception:**
-   When your AI agent reads a file, the MCP server translates original terms to masked names (e.g. `Class_1`, `Var_2`). When writing back, it translates masked names back to original names. It also intercepts calls using `notepad.exe` so you can manually review/verify what the AI is seeing.
+3. **Inline Masking & Editor Interception:**
+   When your AI agent reads a file, the MCP server translates original terms to masked names (e.g. `Class_1`, `Var_2`). When writing back, it translates masked names back to original names. It also intercepts calls using VS Code (with a `--wait` temporary tab) or `notepad.exe` as a fallback, so you can manually review/verify what the AI is seeing.
 
 ## Commands
 

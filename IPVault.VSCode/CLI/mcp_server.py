@@ -5,6 +5,7 @@ import json
 import uuid
 import subprocess
 import asyncio
+import shutil
 
 _forwardMap = {}
 _reverseMap = {}
@@ -149,23 +150,44 @@ def unfilter_text(text):
 
     return text
 
-async def intercept_with_notepad(tool_name, content):
+async def open_in_editor(temp_file):
+    code_path = shutil.which("code")
+    if code_path:
+        try:
+            # Open temp file in VS Code and wait for it to close
+            proc = await asyncio.create_subprocess_exec(
+                "cmd.exe", "/c", f'code --wait "{temp_file}"',
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+            await proc.wait()
+            return
+        except Exception as e:
+            print(f"[IPVault.Mcp] Failed to open in VS Code: {e}. Falling back to notepad...", file=sys.stderr)
+            
+    # Fallback to Notepad
+    try:
+        proc = await asyncio.create_subprocess_exec("notepad.exe", temp_file)
+        await proc.wait()
+    except Exception as e:
+        print(f"[IPVault.Mcp] Failed to open in Notepad: {e}", file=sys.stderr)
+
+async def intercept_with_editor(tool_name, content):
     temp_file = os.path.join(os.environ.get("TEMP", "."), f"ipvault_mcp_{uuid.uuid4().hex}.txt")
     header = (
         "=== IPVAULT MCP INTERCEPT ===\r\n"
         f"Tool: {tool_name}\r\n"
         "Instructions: You can review and edit the content below.\r\n"
-        "Save the file and close Notepad to continue sending this response back to the AI.\r\n"
+        "Save the file and close the editor tab (or Notepad) to continue sending this response back to the AI.\r\n"
         "=============================\r\n\r\n"
     )
     try:
         with open(temp_file, "w", encoding="utf-8") as f:
             f.write(header + content)
             
-        proc = await asyncio.create_subprocess_exec("notepad.exe", temp_file)
-        await proc.wait()
+        await open_in_editor(temp_file)
     except Exception as e:
-        print(f"[IPVault.Mcp] Error during Notepad interception: {e}", file=sys.stderr)
+        print(f"[IPVault.Mcp] Error during editor interception: {e}", file=sys.stderr)
 
     new_content = ""
     try:
@@ -182,20 +204,19 @@ async def intercept_with_notepad(tool_name, content):
         
     return new_content
 
-async def show_to_user_with_notepad(content):
+async def show_to_user_with_editor(content):
     temp_file = os.path.join(os.environ.get("TEMP", "."), f"ipvault_mcp_show_{uuid.uuid4().hex}.txt")
     header = (
         "=== IPVAULT: AI SHARED THIS WITH YOU ===\r\n"
         "Instructions: The AI wants to show you this unmasked code/text.\r\n"
-        "Close Notepad to continue. The AI will NOT see this content.\r\n"
+        "Close the editor tab (or Notepad) to continue. The AI will NOT see this content.\r\n"
         "========================================\r\n\r\n"
     )
     try:
         with open(temp_file, "w", encoding="utf-8") as f:
             f.write(header + content)
             
-        proc = await asyncio.create_subprocess_exec("notepad.exe", temp_file)
-        await proc.wait()
+        await open_in_editor(temp_file)
     except Exception as e:
         print(f"[IPVault.Mcp] Error showing to user: {e}", file=sys.stderr)
     finally:
@@ -395,7 +416,7 @@ async def handle_message(message_json):
                     raw_text = f.read()
 
                 content = filter_text(raw_text)
-                content = await intercept_with_notepad("mcp_read_file", content)
+                content = await intercept_with_editor("mcp_read_file", content)
             elif tool_name == "mcp_write_file":
                 path = arguments.get("path", "")
                 if not os.path.isabs(path):
@@ -407,7 +428,7 @@ async def handle_message(message_json):
                     f.write(unfiltered)
 
                 content = f"Successfully wrote to {path}"
-                content = await intercept_with_notepad("mcp_write_file", content)
+                content = await intercept_with_editor("mcp_write_file", content)
             elif tool_name == "mcp_exec_command":
                 command = arguments.get("command", "")
                 cwd = arguments.get("cwd", _solutionDir)
@@ -434,11 +455,11 @@ async def handle_message(message_json):
                     combined += "STDERR:\n" + stderr_str
 
                 content = filter_text(combined)
-                content = await intercept_with_notepad("mcp_exec_command", content)
+                content = await intercept_with_editor("mcp_exec_command", content)
             elif tool_name == "mcp_show_to_user":
                 text_content = arguments.get("content", "")
                 unfiltered = unfilter_text(text_content)
-                await show_to_user_with_notepad(unfiltered)
+                await show_to_user_with_editor(unfiltered)
                 content = "Successfully displayed to user."
             else:
                 raise Exception(f"Unknown tool: {tool_name}")
@@ -465,7 +486,7 @@ async def handle_message(message_json):
 
 async def run_interactive_mode():
     print("=== IPVault MCP Interactive Test Mode (Python) ===")
-    print("This mode allows you to manually trigger MCP tools and see the Notepad interception in action.")
+    print("This mode allows you to manually trigger MCP tools and see the editor interception in action.")
     print("\nAvailable commands:")
     print("  read <path>")
     print("  write <path> <content_text...>")
@@ -498,7 +519,7 @@ async def run_interactive_mode():
                 with open(target_path, "r", encoding="utf-8", errors="ignore") as f:
                     raw_text = f.read()
                 result = filter_text(raw_text)
-                result = await intercept_with_notepad("mcp_read_file", result)
+                result = await intercept_with_editor("mcp_read_file", result)
             elif cmd == "write":
                 write_parts = arg.split(' ', 1)
                 if len(write_parts) < 2:
@@ -510,7 +531,7 @@ async def run_interactive_mode():
                 with open(target_path, "w", encoding="utf-8") as f:
                     f.write(unfiltered)
                 result = f"Successfully wrote to {target_path}"
-                result = await intercept_with_notepad("mcp_write_file", result)
+                result = await intercept_with_editor("mcp_write_file", result)
             elif cmd == "exec":
                 unfiltered_command = unfilter_text(arg)
                 proc = await asyncio.create_subprocess_exec(
@@ -528,10 +549,10 @@ async def run_interactive_mode():
                 if stderr_str:
                     combined += "STDERR:\n" + stderr_str
                 result = filter_text(combined)
-                result = await intercept_with_notepad("mcp_exec_command", result)
+                result = await intercept_with_editor("mcp_exec_command", result)
             elif cmd == "show":
                 unfiltered = unfilter_text(arg)
-                await show_to_user_with_notepad(unfiltered)
+                await show_to_user_with_editor(unfiltered)
                 result = "Successfully displayed to user."
             else:
                 print(f"Unknown command: {cmd}")
