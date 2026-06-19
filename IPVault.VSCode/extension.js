@@ -155,10 +155,11 @@ function activate(context) {
         // Create and show an interactive VS Code terminal running the interactive mode
         const terminal = vscode.window.createTerminal({
             name: "IPVault MCP Test",
+            shellPath: "cmd.exe",
             cwd: workspacePath
         });
         
-        terminal.sendText(`echo Starting interactive MCP Test... && "${mcpBatPath}" "${mapPath}" "${workspacePath}" --interactive`);
+        terminal.sendText(`"${mcpBatPath}" "${mapPath}" "${workspacePath}" --interactive`);
         terminal.show();
     });
 
