@@ -45,7 +45,7 @@ def filter_text(text):
     # Sort keys by length descending to avoid partial matches
     sorted_forward = sorted(_forwardMap.items(), key=lambda x: len(x[0]), reverse=True)
     for original, masked in sorted_forward:
-        pattern = r'(?<=^|[^a-zA-Z0-9_])' + re.escape(original) + r'(?=$|[^a-zA-Z0-9_])'
+        pattern = r'\b' + re.escape(original) + r'\b'
         text = re.sub(pattern, masked, text)
 
     # Helper function to tokenize a match
@@ -139,13 +139,12 @@ def unfilter_text(text):
     # Sort keys by length descending to ensure longer tokens are restored first
     sorted_dynamic = sorted(_dynamicReverseMap.items(), key=lambda x: len(x[0]), reverse=True)
     for token, val in sorted_dynamic:
-        pattern = r'(?<=^|[^a-zA-Z0-9_])' + re.escape(token) + r'(?=$|[^a-zA-Z0-9_])'
-        text = re.sub(pattern, val, text)
+        text = text.replace(token, val)
 
     # 2. Restore Map Tokens
     sorted_reverse = sorted(_reverseMap.items(), key=lambda x: len(x[0]), reverse=True)
     for masked, original in sorted_reverse:
-        pattern = r'(?<=^|[^a-zA-Z0-9_])' + re.escape(masked) + r'(?=$|[^a-zA-Z0-9_])'
+        pattern = r'\b' + re.escape(masked) + r'\b'
         text = re.sub(pattern, original, text)
 
     return text
