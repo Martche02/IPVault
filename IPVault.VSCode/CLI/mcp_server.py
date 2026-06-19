@@ -434,9 +434,9 @@ async def handle_message(message_json):
                     cwd = os.path.abspath(os.path.join(_solutionDir, cwd))
                 unfiltered_command = unfilter_text(command)
 
-                # Run on cmd.exe since we are on Windows
-                proc = await asyncio.create_subprocess_exec(
-                    "cmd.exe", "/c", unfiltered_command,
+                # Run shell command directly to prevent Windows escaping from adding extra backslashes to quotes
+                proc = await asyncio.create_subprocess_shell(
+                    unfiltered_command,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     cwd=cwd
@@ -532,8 +532,8 @@ async def run_interactive_mode():
                 result = await intercept_with_editor("mcp_write_file", result)
             elif cmd == "exec":
                 unfiltered_command = unfilter_text(arg)
-                proc = await asyncio.create_subprocess_exec(
-                    "cmd.exe", "/c", unfiltered_command,
+                proc = await asyncio.create_subprocess_shell(
+                    unfiltered_command,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     cwd=_solutionDir
