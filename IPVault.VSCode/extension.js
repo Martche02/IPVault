@@ -163,7 +163,106 @@ function activate(context) {
         terminal.show();
     });
 
-    context.subscriptions.push(generateDisposable, getConfigDisposable, testInteractiveDisposable);
+    // Command: Show Options Menu (Quick Pick)
+    let showMenuDisposable = vscode.commands.registerCommand('ipvault.showMenu', () => {
+        vscode.window.showQuickPick([
+            {
+                label: "$(symbol-class) Generate Symbol Map",
+                description: "Extract workspace symbols and rebuild filter.json",
+                commandId: 'ipvault.generate'
+            },
+            {
+                label: "$(copy) Get MCP Config",
+                description: "Copy MCP server configurations to clipboard",
+                commandId: 'ipvault.getConfig'
+            },
+            {
+                label: "$(terminal) Test MCP Interactive",
+                description: "Start interactive masking terminal console",
+                commandId: 'ipvault.testInteractive'
+            }
+        ], {
+            placeHolder: "Select an IPVault action to execute"
+        }).then(selected => {
+            if (selected) {
+                vscode.commands.executeCommand(selected.commandId);
+            }
+        });
+    });
+
+    // Register sidebar tree view
+    const treeDataProvider = new IPVaultTreeDataProvider();
+    const treeView = vscode.window.registerTreeDataProvider('ipvault-actions', treeDataProvider);
+
+    // Create status bar item
+    const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+    statusBarItem.text = "$(shield) IPVault";
+    statusBarItem.tooltip = "Click to open IPVault Control Panel";
+    statusBarItem.command = "ipvault.showMenu";
+    statusBarItem.show();
+
+    context.subscriptions.push(
+        generateDisposable, 
+        getConfigDisposable, 
+        testInteractiveDisposable,
+        showMenuDisposable,
+        statusBarItem,
+        treeView
+    );
+}
+
+class IPVaultTreeDataProvider {
+    getTreeItem(element) {
+        return element;
+    }
+
+    getChildren(element) {
+        if (!element) {
+            return [
+                new IPVaultTreeItem(
+                    "Generate Symbol Map",
+                    "Extract workspace symbols and rebuild filter.json",
+                    vscode.TreeItemCollapsibleState.None,
+                    {
+                        command: 'ipvault.generate',
+                        title: 'Generate Symbol Map'
+                    },
+                    new vscode.ThemeIcon('symbol-class')
+                ),
+                new IPVaultTreeItem(
+                    "Get MCP Config",
+                    "Copy MCP server configurations to clipboard",
+                    vscode.TreeItemCollapsibleState.None,
+                    {
+                        command: 'ipvault.getConfig',
+                        title: 'Get MCP Config'
+                    },
+                    new vscode.ThemeIcon('copy')
+                ),
+                new IPVaultTreeItem(
+                    "Test MCP Interactive",
+                    "Start interactive masking terminal console",
+                    vscode.TreeItemCollapsibleState.None,
+                    {
+                        command: 'ipvault.testInteractive',
+                        title: 'Test MCP Interactive'
+                    },
+                    new vscode.ThemeIcon('terminal')
+                )
+            ];
+        }
+        return [];
+    }
+}
+
+class IPVaultTreeItem extends vscode.TreeItem {
+    constructor(label, tooltip, collapsibleState, command, icon) {
+        super(label, collapsibleState);
+        this.tooltip = tooltip;
+        this.command = command;
+        this.iconPath = icon;
+        this.contextValue = 'actions';
+    }
 }
 
 function deactivate() {}
