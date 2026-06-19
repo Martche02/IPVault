@@ -24,7 +24,9 @@ STANDARD_LIBS = {
     "os", "sys", "re", "json", "math", "datetime", "time", "collections", "itertools", 
     "functools", "pathlib", "shutil", "argparse", "subprocess", "logging", "threading", 
     "multiprocessing", "uuid", "hashlib", "socket", "select", "asyncio", "csv", "xml", 
-    "ast", "parser", "typing", "tempfile", "traceback", "pdb", "unittest", "mock"
+    "ast", "parser", "typing", "tempfile", "traceback", "pdb", "unittest", "mock",
+    "pd", "np", "plt", "sns", "tf", "torch", "pandas", "numpy", "matplotlib", "seaborn", 
+    "tensorflow", "urllib", "requests", "pytest", "scipy", "sklearn", "flask", "django"
 }
 BASE_BLACKLIST |= STANDARD_LIBS
 
@@ -48,6 +50,28 @@ BATCH_KEYWORDS = {
     "find", "findstr", "attrib", "assoc", "ftype", "path", "pushd", "popd", "cd", "dir", 
     "start", "taskkill", "tasklist", "xcopy", "robocopy", "powershell", "cmd", "python", 
     "git", "npm", "dotnet", "msbuild", "defined", "exist", "not", "nul", "con"
+}
+
+# Common Python object/type attribute and method names that should NOT be masked
+COMMON_ATTRIBUTES = {
+    # List/Dict/Set/String methods
+    "append", "extend", "insert", "remove", "pop", "clear", "index", "count", "sort", "reverse", "copy",
+    "keys", "values", "items", "get", "fromkeys", "popitem", "setdefault", "update",
+    "add", "difference", "difference_update", "discard", "intersection", "intersection_update",
+    "isdisjoint", "issubset", "issuperset", "symmetric_difference", "symmetric_difference_update", "union",
+    "capitalize", "casefold", "center", "encode", "endswith", "expandtabs", "find", "format", "format_map",
+    "isalnum", "isalpha", "isascii", "isdecimal", "isdigit", "isidentifier", "islower", "isnumeric",
+    "isprintable", "isspace", "istitle", "isupper", "join", "ljust", "lower", "lstrip", "maketrans",
+    "partition", "removeprefix", "removesuffix", "replace", "rfind", "rindex", "rjust", "rpartition",
+    "rsplit", "rstrip", "split", "splitlines", "startswith", "strip", "swapcase", "title", "translate",
+    "upper", "zfill",
+    # File / IO methods
+    "close", "detach", "fileno", "flush", "isatty", "read", "readable", "readline", "readlines",
+    "seek", "seekable", "tell", "truncate", "writable", "write", "writelines",
+    # Standard library / framework / common naming conventions
+    "dumps", "loads", "dump", "load", "path", "exists", "dirname", "basename", "abspath", "isdir", "isfile",
+    "env", "environ", "exit", "argv", "logger", "info", "warning", "error", "critical", "debug", "exception", "log",
+    "run", "start", "stop", "main", "parse", "args", "kwargs", "setup", "teardown", "test"
 }
 
 def is_valid_identifier(name):
@@ -146,10 +170,24 @@ class PythonSymbolExtractor(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Attribute(self, node):
-        # Extract attributes/methods accessed on self anywhere in the code
-        if isinstance(node.value, ast.Name) and node.value.id == "self":
-            if is_valid_identifier(node.attr):
-                var_names.add(node.attr)
+        # Extract attributes/methods accessed on self or other proprietary objects/classes
+        if is_valid_identifier(node.attr):
+            attr_lower = node.attr.lower()
+            if node.attr not in COMMON_ATTRIBUTES and attr_lower not in COMMON_ATTRIBUTES:
+                receiver_name = None
+                if isinstance(node.value, ast.Name):
+                    receiver_name = node.value.id
+                elif isinstance(node.value, ast.Attribute):
+                    base = node.value
+                    while isinstance(base, ast.Attribute):
+                        base = base.value
+                    if isinstance(base, ast.Name):
+                        receiver_name = base.id
+
+                # Only protect if the receiver is local or self/cls (excluding external modules/libraries)
+                if receiver_name in ("self", "cls") or (receiver_name and receiver_name not in BASE_BLACKLIST and receiver_name not in STANDARD_LIBS):
+                    var_names.add(node.attr)
+                    
         self.generic_visit(node)
 
     def _extract_target(self, node):
