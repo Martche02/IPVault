@@ -185,6 +185,11 @@ function activate(context) {
                 label: "$(edit) Translate Prompt to Masked",
                 description: "Replace unprotected names in selection or clipboard with masked ones",
                 commandId: 'ipvault.translatePrompt'
+            },
+            {
+                label: "$(history) Unmask/Restore Original Names",
+                description: "Replace masked names (Class_X/Var_Y) in selection or clipboard with original ones",
+                commandId: 'ipvault.unmaskText'
             }
         ], {
             placeHolder: "Select an IPVault action to execute"
@@ -220,16 +225,26 @@ function activate(context) {
             return filteredText;
         }
 
-        function showResult(translated) {
-            vscode.env.clipboard.writeText(translated).then(() => {
-                vscode.workspace.openTextDocument({
-                    content: translated,
-                    language: "markdown"
-                }).then(doc => {
-                    vscode.window.showTextDocument(doc);
-                    vscode.window.showInformationMessage("Translated prompt copied to clipboard!");
+        function showResult(translated, inPlaceEditor = null) {
+            if (inPlaceEditor) {
+                inPlaceEditor.edit(editBuilder => {
+                    editBuilder.replace(inPlaceEditor.selection, translated);
+                }).then(success => {
+                    if (success) {
+                        vscode.window.showInformationMessage("Selected text masked in-place!");
+                    }
                 });
-            });
+            } else {
+                vscode.env.clipboard.writeText(translated).then(() => {
+                    vscode.workspace.openTextDocument({
+                        content: translated,
+                        language: "markdown"
+                    }).then(doc => {
+                        vscode.window.showTextDocument(doc);
+                        vscode.window.showInformationMessage("Translated prompt copied to clipboard!");
+                    });
+                });
+            }
         }
 
         // Try reading selection first
@@ -237,7 +252,7 @@ function activate(context) {
         if (editor && !editor.selection.isEmpty) {
             const selectedText = editor.document.getText(editor.selection);
             const translated = translateText(selectedText);
-            showResult(translated);
+            showResult(translated, editor);
         } else {
             // Read from clipboard, or prompt if clipboard is empty
             vscode.env.clipboard.readText().then(clipText => {
@@ -253,6 +268,88 @@ function activate(context) {
                         if (input) {
                             const translated = translateText(input);
                             showResult(translated);
+                        }
+                    });
+                }
+            });
+        }
+    });
+
+    // Command: Restore Original Names (Unmask Text)
+    let unmaskTextDisposable = vscode.commands.registerCommand('ipvault.unmaskText', () => {
+        const workspacePath = getWorkspaceFolder();
+        if (!workspacePath) return;
+
+        const mapPath = path.join(workspacePath, '.vscode', 'filter.json');
+        if (!fs.existsSync(mapPath)) {
+            vscode.window.showWarningMessage("IP Vault map not found. Please run 'IP Vault: Generate IP Vault' first.");
+            return;
+        }
+
+        // Helper to perform the reverse translation (restore original names)
+        function translateTextBack(text) {
+            const mapData = JSON.parse(fs.readFileSync(mapPath, 'utf8'));
+            // Invert the map: masked -> original
+            const reverseMap = {};
+            for (const [original, masked] of Object.entries(mapData)) {
+                reverseMap[masked] = original;
+            }
+            const keys = Object.keys(reverseMap).sort((a, b) => b.length - a.length);
+            let unmaskedText = text;
+            for (const masked of keys) {
+                const original = reverseMap[masked];
+                const escapedMasked = masked.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+                const regex = new RegExp('\\b' + escapedMasked + '\\b', 'g');
+                unmaskedText = unmaskedText.replace(regex, original);
+            }
+            return unmaskedText;
+        }
+
+        function showResult(unmasked, inPlaceEditor = null) {
+            if (inPlaceEditor) {
+                inPlaceEditor.edit(editBuilder => {
+                    editBuilder.replace(inPlaceEditor.selection, unmasked);
+                }).then(success => {
+                    if (success) {
+                        vscode.window.showInformationMessage("Selected text unmasked in-place!");
+                    }
+                });
+            } else {
+                vscode.env.clipboard.writeText(unmasked).then(() => {
+                    // Open a temporary untitled document with the unmasked text (allowing user to save it)
+                    const ext = vscode.window.activeTextEditor ? path.extname(vscode.window.activeTextEditor.document.fileName) : '';
+                    vscode.workspace.openTextDocument({
+                        content: unmasked,
+                        language: ext === '.py' ? 'python' : (ext === '.sql' ? 'sql' : 'text')
+                    }).then(doc => {
+                        vscode.window.showTextDocument(doc);
+                        vscode.window.showInformationMessage("Unmasked content opened in new editor and copied to clipboard!");
+                    });
+                });
+            }
+        }
+
+        // Try reading selection first
+        const editor = vscode.window.activeTextEditor;
+        if (editor && !editor.selection.isEmpty) {
+            const selectedText = editor.document.getText(editor.selection);
+            const unmasked = translateTextBack(selectedText);
+            showResult(unmasked, editor);
+        } else {
+            // Read from clipboard, or prompt if clipboard is empty
+            vscode.env.clipboard.readText().then(clipText => {
+                if (clipText && clipText.trim()) {
+                    const unmasked = translateTextBack(clipText);
+                    showResult(unmasked);
+                } else {
+                    vscode.window.showInputBox({
+                        prompt: "Paste your anonymized code containing Class_X/Var_Y names to unmask",
+                        placeHolder: "e.g., def Func_1(self): ...",
+                        ignoreFocusOut: true
+                    }).then(input => {
+                        if (input) {
+                            const unmasked = translateTextBack(input);
+                            showResult(unmasked);
                         }
                     });
                 }
@@ -277,6 +374,7 @@ function activate(context) {
         testInteractiveDisposable,
         showMenuDisposable,
         translatePromptDisposable,
+        unmaskTextDisposable,
         statusBarItem,
         treeView
     );
@@ -329,6 +427,16 @@ class IPVaultTreeDataProvider {
                         title: 'Translate Prompt'
                     },
                     new vscode.ThemeIcon('edit')
+                ),
+                new IPVaultTreeItem(
+                    "Unmask/Restore Names",
+                    "Replace masked names (Class_X/Var_Y) in a prompt/code block with original ones",
+                    vscode.TreeItemCollapsibleState.None,
+                    {
+                        command: 'ipvault.unmaskText',
+                        title: 'Unmask/Restore Names'
+                    },
+                    new vscode.ThemeIcon('history')
                 )
             ];
         }

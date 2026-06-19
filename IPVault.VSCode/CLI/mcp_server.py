@@ -11,6 +11,7 @@ _forwardMap = {}
 _reverseMap = {}
 _dynamicReverseMap = {}
 _dynamicVarCounter = 1
+_mapPath = ""
 
 _strCounter = 1
 _commentCounter = 1
@@ -169,17 +170,18 @@ def filter_text(text):
                         _dynamicVarCounter += 1
                         new_regs[attr] = token
                             
-        # Apply all new registrations to the map
+        # Apply all new registrations to the map and save back to filter.json
         for attr, token in new_regs.items():
             _forwardMap[attr] = token
             _reverseMap[token] = attr
             print(f"[IPVault.Mcp] Dynamically registered nested attribute '{attr}' -> '{token}'", file=sys.stderr)
-                            
-        # Apply all new registrations to the map
-        for attr, token in new_regs.items():
-            _forwardMap[attr] = token
-            _reverseMap[token] = attr
-            print(f"[IPVault.Mcp] Dynamically registered nested attribute '{attr}' -> '{token}'", file=sys.stderr)
+            
+        if new_regs and _mapPath:
+            try:
+                with open(_mapPath, "w", encoding="utf-8") as f:
+                    json.dump(_forwardMap, f, indent=2)
+            except Exception as e:
+                print(f"[IPVault.Mcp] Error writing back to map path: {e}", file=sys.stderr)
 
     # 1. Apply Map replacements first (boundaries)
     # Sort keys by length descending to avoid partial matches
@@ -704,13 +706,14 @@ def load_requirements_txt(solution_dir):
     return libs
 
 async def main():
-    global _solutionDir
+    global _solutionDir, _mapPath
     if len(sys.argv) < 2:
         print("Usage: python mcp_server.py <filter_json_path> <solution_dir> [--interactive]", file=sys.stderr)
         sys.exit(1)
 
     map_path = os.path.abspath(sys.argv[1])
     _solutionDir = os.path.abspath(sys.argv[2])
+    _mapPath = map_path
 
     load_map(map_path)
 

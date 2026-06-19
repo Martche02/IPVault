@@ -39,6 +39,11 @@
         "command": "ipvault.translatePrompt",
         "title": "IP Vault: Translate Prompt to Masked",
         "icon": "$(edit)"
+      },
+      {
+        "command": "ipvault.unmaskText",
+        "title": "IP Vault: Unmask/Restore Original Names",
+        "icon": "$(history)"
       }
     ],
     "viewsContainers": {
