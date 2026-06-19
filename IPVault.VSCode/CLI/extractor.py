@@ -21,12 +21,19 @@ BASE_BLACKLIST = set(keyword.kwlist) | set(dir(builtins)) | {
 
 # Add standard library module names to blacklist to avoid masking them if imported
 STANDARD_LIBS = {
+    # Standard library module names
     "os", "sys", "re", "json", "math", "datetime", "time", "collections", "itertools", 
     "functools", "pathlib", "shutil", "argparse", "subprocess", "logging", "threading", 
     "multiprocessing", "uuid", "hashlib", "socket", "select", "asyncio", "csv", "xml", 
     "ast", "parser", "typing", "tempfile", "traceback", "pdb", "unittest", "mock",
-    "pd", "np", "plt", "sns", "tf", "torch", "pandas", "numpy", "matplotlib", "seaborn", 
-    "tensorflow", "urllib", "requests", "pytest", "scipy", "sklearn", "flask", "django"
+    "urllib", "http", "html", "email", "ftplib", "sqlite3", "io", "glob", "fnmatch",
+    "pickle", "copy", "weakref", "gc", "inspect", "struct", "ctypes",
+    # Well-known external libraries and their common aliases
+    "pandas", "numpy", "matplotlib", "seaborn", "tensorflow", "torch", "scipy", "sklearn",
+    "keras", "jax", "cv2", "pil", "requests", "flask", "django", "fastapi", "uvicorn",
+    "pytest", "sqlalchemy", "yaml", "toml", "jinja2", "click", "tqdm", "boto3", "pymongo",
+    "redis", "pydantic", "black", "flake8",
+    "pd", "np", "plt", "sns", "tf"
 }
 BASE_BLACKLIST |= STANDARD_LIBS
 

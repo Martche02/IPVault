@@ -48,11 +48,51 @@ def load_map(path):
 # Programmatically build base blacklist (reserved keywords, built-ins, and magic methods)
 import keyword
 import builtins
+
+# SQL Reserved Keywords Blacklist
+SQL_KEYWORDS = {
+    "select", "insert", "update", "delete", "from", "where", "join", "on", "create", 
+    "table", "int", "integer", "varchar", "text", "drop", "into", "values", "and", "or", 
+    "not", "null", "primary", "key", "foreign", "references", "database", "index", "view", 
+    "procedure", "function", "returns", "as", "begin", "end", "if", "else", "declare", 
+    "set", "exec", "execute", "with", "by", "order", "group", "having", "count", "sum", 
+    "min", "max", "avg", "left", "right", "inner", "outer", "cross", "union", "all", 
+    "any", "some", "exists", "in", "like", "between", "is", "true", "false", "add", 
+    "alter", "column", "constraint", "default", "unique", "check", "numeric", "decimal", 
+    "float", "double", "date", "datetime", "timestamp", "boolean", "bigint", "smallint"
+}
+
+# Batch Reserved Keywords Blacklist
+BATCH_KEYWORDS = {
+    "echo", "set", "call", "exit", "goto", "if", "else", "rem", "pause", "cls", 
+    "errorlevel", "for", "in", "do", "del", "copy", "move", "mkdir", "rmdir", "type", 
+    "find", "findstr", "attrib", "assoc", "ftype", "path", "pushd", "popd", "cd", "dir", 
+    "start", "taskkill", "tasklist", "xcopy", "robocopy", "powershell", "cmd", "python", 
+    "git", "npm", "dotnet", "msbuild", "defined", "exist", "not", "nul", "con"
+}
+
+# Standard python library modules and common external packages/aliases
+UNPROTECTED_ROOTS = {
+    # Standard library module names
+    "os", "sys", "re", "json", "math", "datetime", "time", "collections", "itertools", 
+    "functools", "pathlib", "shutil", "argparse", "subprocess", "logging", "threading", 
+    "multiprocessing", "uuid", "hashlib", "socket", "select", "asyncio", "csv", "xml", 
+    "ast", "parser", "typing", "tempfile", "traceback", "pdb", "unittest", "mock",
+    "urllib", "http", "html", "email", "ftplib", "sqlite3", "io", "glob", "fnmatch",
+    "pickle", "copy", "weakref", "gc", "inspect", "struct", "ctypes",
+    # Well-known external libraries and their common aliases
+    "pandas", "numpy", "matplotlib", "seaborn", "tensorflow", "torch", "scipy", "sklearn",
+    "keras", "jax", "cv2", "pil", "requests", "flask", "django", "fastapi", "uvicorn",
+    "pytest", "sqlalchemy", "yaml", "toml", "jinja2", "click", "tqdm", "boto3", "pymongo",
+    "redis", "pydantic", "black", "flake8",
+    "pd", "np", "plt", "sns", "tf"
+}
+
 BASE_BLACKLIST = set(keyword.kwlist) | set(dir(builtins)) | {
     "self", "cls", "__init__", "__str__", "__repr__", "__name__", "__main__", "__module__",
     "__dict__", "__weakref__", "__doc__", "__file__", "__package__", "__loader__", "__spec__",
     "__path__", "__cached__", "args", "kwargs", "argv"
-}
+} | SQL_KEYWORDS | BATCH_KEYWORDS | UNPROTECTED_ROOTS
 
 # Common Python object/type attribute and method names that should NOT be masked
 COMMON_ATTRIBUTES = {
@@ -89,6 +129,7 @@ def is_valid_identifier(name):
 
 # String tokenizing regex
 # Matches Python comments starting with #
+# For CMD/Batch comments, we don't treat # as a comment start since # can be part of paths, but for python we do.
 COMMENT_RE = re.compile(r'#.*')
 
 # Matches Python lambdas: lambda [args]: [expr]
@@ -105,15 +146,34 @@ def filter_text(text):
         for match in chain_regex.finditer(text):
             chain = match.group(0)
             parts = chain.split('.')
-            for i in range(len(parts) - 1):
-                receiver = parts[i]
-                if receiver in _forwardMap or receiver in new_regs:
-                    attr = parts[i+1]
-                    if is_valid_identifier(attr) and attr not in _forwardMap and attr not in new_regs:
-                        if attr not in COMMON_ATTRIBUTES and attr.lower() not in COMMON_ATTRIBUTES:
-                            token = f"Var_{_dynamicVarCounter}"
-                            _dynamicVarCounter += 1
-                            new_regs[attr] = token
+            if not parts:
+                continue
+            
+            root = parts[0]
+            # Check if root is known unprotected
+            if root.lower() in UNPROTECTED_ROOTS or root.lower() in BASE_BLACKLIST:
+                if root in ("self", "cls"):
+                    start_idx = 1
+                else:
+                    # Skip the whole chain because the root is unprotected (e.g. numpy.random.rand)
+                    continue
+            else:
+                start_idx = 0
+                
+            # Protect every valid identifier in the proprietary chain from start_idx onwards
+            for i in range(start_idx, len(parts)):
+                attr = parts[i]
+                if is_valid_identifier(attr) and attr not in _forwardMap and attr not in new_regs:
+                    if attr not in COMMON_ATTRIBUTES and attr.lower() not in COMMON_ATTRIBUTES:
+                        token = f"Var_{_dynamicVarCounter}"
+                        _dynamicVarCounter += 1
+                        new_regs[attr] = token
+                            
+        # Apply all new registrations to the map
+        for attr, token in new_regs.items():
+            _forwardMap[attr] = token
+            _reverseMap[token] = attr
+            print(f"[IPVault.Mcp] Dynamically registered nested attribute '{attr}' -> '{token}'", file=sys.stderr)
                             
         # Apply all new registrations to the map
         for attr, token in new_regs.items():
