@@ -10,6 +10,7 @@ import shutil
 _forwardMap = {}
 _reverseMap = {}
 _dynamicReverseMap = {}
+_dynamicVarCounter = 1
 
 _strCounter = 1
 _commentCounter = 1
@@ -18,18 +19,73 @@ _lambdaCounter = 1
 _solutionDir = os.getcwd()
 
 def load_map(path):
-    global _forwardMap, _reverseMap
+    global _forwardMap, _reverseMap, _dynamicVarCounter
     try:
         if os.path.exists(path):
             with open(path, "r", encoding="utf-8") as f:
                 map_data = json.load(f)
                 _forwardMap = map_data
                 _reverseMap = {v: k for k, v in map_data.items()}
-            print(f"[IPVault.Mcp] Loaded map with {len(_forwardMap)} keys from {path}", file=sys.stderr)
+            
+            # Initialize dynamic variable counter to max existing index + 1
+            max_idx = 0
+            for v in _forwardMap.values():
+                if isinstance(v, str) and v.startswith("Var_"):
+                    try:
+                        idx = int(v[4:])
+                        if idx > max_idx:
+                            max_idx = idx
+                    except:
+                        pass
+            _dynamicVarCounter = max_idx + 1
+            
+            print(f"[IPVault.Mcp] Loaded map with {len(_forwardMap)} keys from {path} (next dynamic index: {_dynamicVarCounter})", file=sys.stderr)
         else:
             print(f"[IPVault.Mcp] Warning: Map file not found at {path}", file=sys.stderr)
     except Exception as e:
         print(f"[IPVault.Mcp] Error loading map file '{path}': {e}", file=sys.stderr)
+
+# Programmatically build base blacklist (reserved keywords, built-ins, and magic methods)
+import keyword
+import builtins
+BASE_BLACKLIST = set(keyword.kwlist) | set(dir(builtins)) | {
+    "self", "cls", "__init__", "__str__", "__repr__", "__name__", "__main__", "__module__",
+    "__dict__", "__weakref__", "__doc__", "__file__", "__package__", "__loader__", "__spec__",
+    "__path__", "__cached__", "args", "kwargs", "argv"
+}
+
+# Common Python object/type attribute and method names that should NOT be masked
+COMMON_ATTRIBUTES = {
+    # List/Dict/Set/String methods
+    "append", "extend", "insert", "remove", "pop", "clear", "index", "count", "sort", "reverse", "copy",
+    "keys", "values", "items", "get", "fromkeys", "popitem", "setdefault", "update",
+    "add", "difference", "difference_update", "discard", "intersection", "intersection_update",
+    "isdisjoint", "issubset", "issuperset", "symmetric_difference", "symmetric_difference_update", "union",
+    "capitalize", "casefold", "center", "encode", "endswith", "expandtabs", "find", "format", "format_map",
+    "isalnum", "isalpha", "isascii", "isdecimal", "isdigit", "isidentifier", "islower", "isnumeric",
+    "isprintable", "isspace", "istitle", "isupper", "join", "ljust", "lower", "lstrip", "maketrans",
+    "partition", "removeprefix", "removesuffix", "replace", "rfind", "rindex", "rjust", "rpartition",
+    "rsplit", "rstrip", "split", "splitlines", "startswith", "strip", "swapcase", "title", "translate",
+    "upper", "zfill",
+    # File / IO methods
+    "close", "detach", "fileno", "flush", "isatty", "read", "readable", "readline", "readlines",
+    "seek", "seekable", "tell", "truncate", "writable", "write", "writelines",
+    # Standard library / framework / common naming conventions
+    "dumps", "loads", "dump", "load", "path", "exists", "dirname", "basename", "abspath", "isdir", "isfile",
+    "env", "environ", "exit", "argv", "logger", "info", "warning", "error", "critical", "debug", "exception", "log",
+    "run", "start", "stop", "main", "parse", "args", "kwargs", "setup", "teardown", "test"
+}
+
+def is_valid_identifier(name):
+    if not name:
+        return False
+    if name.lower() in BASE_BLACKLIST:
+        return False
+    if name[0].isdigit():
+        return False
+    if len(name) < 2:
+        return False
+    return True
 
 # String tokenizing regex
 # Matches Python comments starting with #
@@ -39,8 +95,30 @@ COMMENT_RE = re.compile(r'#.*')
 LAMBDA_RE = re.compile(r'\blambda\b[^:]*:[^,\n)]*')
 
 def filter_text(text):
-    global _strCounter, _commentCounter, _lambdaCounter
+    global _strCounter, _commentCounter, _lambdaCounter, _dynamicVarCounter
     
+    # 0. Detect and dynamically register attributes accessed on protected names
+    if _forwardMap:
+        # Build alternation of all currently known protected keys
+        keys_escaped = '|'.join(re.escape(k) for k in _forwardMap.keys() if is_valid_identifier(k))
+        if keys_escaped:
+            # Match: protected_key.attribute
+            attr_regex = re.compile(r'\b(' + keys_escaped + r')\.([a-zA-Z_][a-zA-Z0-9_]*)\b')
+            new_regs = {}
+            for match in attr_regex.finditer(text):
+                attr = match.group(2)
+                if is_valid_identifier(attr) and attr not in _forwardMap and attr not in new_regs:
+                    if attr not in COMMON_ATTRIBUTES and attr.lower() not in COMMON_ATTRIBUTES:
+                        token = f"Var_{_dynamicVarCounter}"
+                        _dynamicVarCounter += 1
+                        new_regs[attr] = token
+            
+            # Apply new registrations to map
+            for attr, token in new_regs.items():
+                _forwardMap[attr] = token
+                _reverseMap[token] = attr
+                print(f"[IPVault.Mcp] Dynamically registered attribute '{attr}' -> '{token}'", file=sys.stderr)
+
     # 1. Apply Map replacements first (boundaries)
     # Sort keys by length descending to avoid partial matches
     sorted_forward = sorted(_forwardMap.items(), key=lambda x: len(x[0]), reverse=True)
