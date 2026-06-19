@@ -97,11 +97,14 @@ LAMBDA_RE = re.compile(r'\blambda\b[^:]*:[^,\n)]*')
 def filter_text(text):
     global _strCounter, _commentCounter, _lambdaCounter, _dynamicVarCounter
     
-    # 0. Detect and dynamically register attributes accessed on protected names
+    # 0. Detect and dynamically register attributes accessed on protected names (recursively)
     if _forwardMap:
-        # Build alternation of all currently known protected keys
-        keys_escaped = '|'.join(re.escape(k) for k in _forwardMap.keys() if is_valid_identifier(k))
-        if keys_escaped:
+        while True:
+            # Build alternation of all currently known protected keys
+            keys_escaped = '|'.join(re.escape(k) for k in _forwardMap.keys() if is_valid_identifier(k))
+            if not keys_escaped:
+                break
+                
             # Match: protected_key.attribute
             attr_regex = re.compile(r'\b(' + keys_escaped + r')\.([a-zA-Z_][a-zA-Z0-9_]*)\b')
             new_regs = {}
@@ -113,11 +116,14 @@ def filter_text(text):
                         _dynamicVarCounter += 1
                         new_regs[attr] = token
             
-            # Apply new registrations to map
+            if not new_regs:
+                break
+                
+            # Apply new registrations to map and repeat the scan for nested levels
             for attr, token in new_regs.items():
                 _forwardMap[attr] = token
                 _reverseMap[token] = attr
-                print(f"[IPVault.Mcp] Dynamically registered attribute '{attr}' -> '{token}'", file=sys.stderr)
+                print(f"[IPVault.Mcp] Dynamically registered nested attribute '{attr}' -> '{token}'", file=sys.stderr)
 
     # 1. Apply Map replacements first (boundaries)
     # Sort keys by length descending to avoid partial matches
