@@ -153,9 +153,8 @@ async def open_in_editor(temp_file):
     code_path = shutil.which("code")
     if code_path:
         try:
-            # Open temp file in VS Code and wait for it to close
             proc = await asyncio.create_subprocess_exec(
-                "cmd.exe", "/c", f'code --wait "{temp_file}"',
+                "cmd.exe", "/c", code_path, "--wait", temp_file,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE
             )
