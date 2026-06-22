@@ -15,7 +15,6 @@ _mapPath = ""
 
 _strCounter = 1
 _commentCounter = 1
-_lambdaCounter = 1
 
 _solutionDir = os.getcwd()
 
@@ -133,11 +132,8 @@ def is_valid_identifier(name):
 # For CMD/Batch comments, we don't treat # as a comment start since # can be part of paths, but for python we do.
 COMMENT_RE = re.compile(r'#.*')
 
-# Matches Python lambdas: lambda [args]: [expr]
-LAMBDA_RE = re.compile(r'\blambda\b[^:]*:[^,\n)]*')
-
 def filter_text(text):
-    global _strCounter, _commentCounter, _lambdaCounter, _dynamicVarCounter
+    global _strCounter, _commentCounter, _dynamicVarCounter
     
     # 0. Detect and dynamically register attributes accessed on protected names (recursively)
     if _forwardMap:
@@ -203,11 +199,6 @@ def filter_text(text):
     def comment_repl(match):
         return add_dynamic_token("Comment", match.group(0), "_commentCounter")
     text = COMMENT_RE.sub(comment_repl, text)
-
-    # 3. Tokenize lambdas
-    def lambda_repl(match):
-        return add_dynamic_token("Lambda", match.group(0), "_lambdaCounter")
-    text = LAMBDA_RE.sub(lambda_repl, text)
 
     # 4. Tokenize strings and handle f-strings
     # Python strings regex (includes triple-quoted and single/double-quoted with prefixes)
